@@ -12,17 +12,21 @@ apenas "como correr e o que existe nesta iteração".
 
 ## Como abrir a demo
 
-Não há build nem servidor: `frontend/` é tudo vanilla JS (sem frameworks,
+Não há build nem servidor: `docs/` é tudo vanilla JS (sem frameworks,
 sem bundler), com `<script>` normais carregados por ordem no
 `index.html`. Basta abrir o ficheiro diretamente no browser:
 
 ```
-frontend/index.html
+docs/index.html
 ```
 
-(duplo clique, ou `file:///caminho/para/savi/frontend/index.html`).
+(duplo clique, ou `file:///caminho/para/savi/docs/index.html`).
 
-Os dados são simulados em `frontend/js/mockdb.js` e persistidos em
+Chama-se `docs/` (em vez de `frontend/`, o nome usado numa versão anterior
+deste README) porque é o nome que o GitHub Pages reconhece nativamente no
+modo "Deploy from a branch" — ver secção abaixo.
+
+Os dados são simulados em `docs/js/mockdb.js` e persistidos em
 `localStorage` do browser — cada browser/perfil mantém o seu próprio
 estado da demo. Para repor os dados de demonstração ao estado inicial,
 abrir a consola do browser nessa página e correr `mockdb._reset()`.
@@ -48,10 +52,10 @@ erro correspondentes.
 
 ## PWA (instalável)
 
-`frontend/` é uma PWA completa: `manifest.webmanifest` + `sw.js` (cache-first
+`docs/` é uma PWA completa: `manifest.webmanifest` + `sw.js` (cache-first
 dos assets, versionado em `SW_VERSION` dentro de `sw.js` — bump esse valor
 sempre que alterares CSS/HTML/JS, senão quem já tem a app instalada continua
-a ver a versão antiga) + ícones em `frontend/icons/`. O service worker só se
+a ver a versão antiga) + ícones em `docs/icons/`. O service worker só se
 regista quando servido por http(s) (GitHub Pages, por exemplo); ao abrir por
 `file://` localmente isso é ignorado de propósito, sem erros na consola.
 
@@ -72,42 +76,38 @@ um input); alvos de toque com pelo menos 44px de altura em botões e
 campos; tabelas da equipa administradora deslizam horizontalmente em vez
 de espremer colunas em ecrãs estreitos.
 
-## Desplegar em GitHub Pages
+## Desplegar em GitHub Pages (Deploy from a branch)
 
-Este repositório ainda não tem histórico git nem remoto configurado — a
-sessão que construiu isto corre num ambiente remoto sem acesso à tua conta
-GitHub, por isso os passos finais são para correres tu, no Terminal, dentro
-desta pasta:
+Decisão desta versão: **Deploy from a branch**, não GitHub Actions — mais
+simples, sem workflow a manter. GitHub Pages, neste modo, só sabe servir a
+pasta `/` (raiz) ou `/docs` de um branch — por isso a app vive em `docs/`
+em vez de `frontend/`.
 
-```bash
-cd "/Users/daniellanzasmartin/Documents/Claude/Projects/SAVI"
+Se subiste o repositório pela interface web do GitHub (arrastando
+ficheiros, sem git/terminal), os passos são:
 
-# 1. Limpar 3 ficheiros/pastas residuais que o ambiente remoto não
-#    conseguiu apagar (permissões da pasta partilhada) — no teu Mac local
-#    apagas sem problema:
-rm -rf .git .DS_Store savi-demo-final.zip
+1. Na página do repositório, apaga a pasta `frontend/` antiga (abre-a,
+   apaga cada ficheiro, ou apaga a pasta toda se o GitHub tiver essa opção
+   no menu "...").
+2. Sobe a pasta `docs/` (já renomeada localmente) tal como subiste
+   `frontend/` da primeira vez — arrastando para "Add file → Upload
+   files". Inclui também `docs/.nojekyll` (ficheiro vazio; garante que o
+   GitHub serve os ficheiros tal como estão, sem o build automático de
+   Jekyll que renderizou o README em vez da app da primeira vez). Como é
+   um ficheiro escondido (começa por ponto), lembra-te de
+   **Cmd+Shift+.** no Finder para o veres e arrastares.
+3. Sobe também o `README.md` atualizado (este ficheiro), substituindo o
+   antigo.
+4. Em **Settings → Pages**:
+   - **Source: Deploy from a branch**
+   - **Branch: `main`**, pasta **`/docs`**
+   - Save
+5. Passado um minuto, a demo fica em
+   `https://pulseirasavi.github.io/Pulseira-Savi/`.
 
-# 2. Inicializar o repositório
-git init
-git branch -m main
-git add -A
-git commit -m "SAVI: primeira iteração — demo PWA + scaffolding Firestore/Worker"
-
-# 3. Criar o repositório no GitHub (nome recomendado pelo CLAUDE.md: savi,
-#    idealmente sob a organização delfos-iq) — via web (github.com/new) ou,
-#    se tiveres o GitHub CLI instalado e autenticado:
-gh repo create delfos-iq/savi --private --source=. --remote=origin
-
-# 4. Push
-git push -u origin main
-```
-
-Depois, em **Settings → Pages** do repositório no GitHub, define **Source:
-GitHub Actions** (não "Deploy from a branch"). O workflow
-`.github/workflows/deploy-pages.yml`, já incluído, publica automaticamente o
-conteúdo de `frontend/` a cada push para `main` — a demo fica acessível em
-`https://delfos-iq.github.io/savi/` (ou o URL correspondente ao teu utilizador/
-organização).
+Se em vez disso usas git/terminal, é mais direto — depois de fazer
+`git mv frontend docs`, `touch docs/.nojekyll`, `git add -A`,
+`git commit` e `git push`, só falta o passo 4 acima.
 
 Nada disto liga a dados reais: continua a ser a mesma demo simulada descrita
 abaixo, só que agora acessível por URL em vez de `file://` — o que também é
@@ -117,7 +117,7 @@ o pré-requisito para poder ser instalada como PWA num telemóvel.
 
 Esta iteração tem duas partes de natureza muito diferente:
 
-**`frontend/js/*-sim.js` — simulação, corre inteiramente no browser:**
+**`docs/js/*-sim.js` — simulação, corre inteiramente no browser:**
 - `mockdb.js` simula o Firestore (persistido em `localStorage`).
 - `auth-sim.js` simula o Firebase Auth (login + custom claims de papel +
   timeout de sessão de 5 min real, medido no próprio browser).
@@ -161,7 +161,7 @@ credenciais reais:**
    ```
 5. Deploy do Worker: `wrangler deploy` a partir de
    `backend/cloudflare-worker/`.
-6. Substituir `frontend/js/worker-sim.js` e `frontend/js/auth-sim.js` por
+6. Substituir `docs/js/worker-sim.js` e `docs/js/auth-sim.js` por
    chamadas reais ao Worker e ao Firebase Auth SDK, respetivamente — o
    resto do frontend (views, router, styles) não deve precisar de
    alterações estruturais, já está desenhado para essa transição.
