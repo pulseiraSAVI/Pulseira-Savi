@@ -1,0 +1,56 @@
+# wrangler.toml — SAVI Cloudflare Worker (break-glass, autorização, audit log)
+#
+# Scaffolding básico para deploy futuro. Não contém segredos — segredos
+# reais (RESEND_API_KEY, credenciais da service account do Firebase) devem
+# ser configurados sempre via `wrangler secret put`, nunca escritos aqui
+# nem commitados no repositório.
+
+name = "savi-worker"
+main = "src/index.js"
+compatibility_date = "2026-08-08"
+
+# TODO: confirmar a região/localização preferencial do Worker junto da
+# Cloudflare (os Workers correm globalmente na rede edge por defeito; não
+# há "região única" como no Firestore). Manter aqui como lembrete de que a
+# base de dados (Firestore) está fixada em europe-west — ver CLAUDE.md.
+
+[vars]
+# Variáveis não-sensíveis (texto simples, versionável).
+# ID do projeto Firebase (europe-west) usado para validar o `aud`/`iss`
+# do ID token do Firebase Auth e para construir os pedidos REST ao
+# Firestore. TODO: substituir pelo project ID real antes do deploy.
+FIREBASE_PROJECT_ID = "TODO-substituir-pelo-project-id-real"
+
+# ---------------------------------------------------------------------
+# Secrets — NUNCA colocar aqui. Configurar com os comandos abaixo antes
+# do primeiro deploy:
+#
+#   wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY
+#     -> chave privada (JSON) da service account com permissão de
+#        leitura/escrita no Firestore do projeto SAVI. Gerada em
+#        Firebase Console > Definições do projeto > Contas de serviço.
+#        Usada para gerar o access token OAuth2 do Worker (ver TODO em
+#        src/index.js, função obterAccessTokenServiceAccount).
+#
+#   wrangler secret put RESEND_API_KEY
+#     -> chave de API do Resend, usada exclusivamente para a notificação
+#        assíncrona ao titular/família a cada acesso (art. 29.º n.º 6,
+#        Lei 58/2019). O corpo do email nunca deve incluir dados
+#        clínicos — apenas o facto de que houve um acesso, quando e a
+#        que nível.
+# ---------------------------------------------------------------------
+
+# TODO: quando o domínio de produção estiver decidido, configurar aqui as
+# rotas (routes) ou usar o subdomínio *.workers.dev apenas para testes,
+# nunca para o piloto real com pacientes.
+# [[routes]]
+# pattern = "worker.savi-piloto.pt/*"
+# zone_name = "savi-piloto.pt"
+
+# TODO: se se optar por Durable Objects para controlar a janela de sessão
+# de 5 min de inatividade do lado do servidor (alternativa a validar via
+# `auth_time` do próprio ID token — ver comentário em src/index.js), este
+# é o local para declarar o binding correspondente:
+# [[durable_objects.bindings]]
+# name = "SESSOES"
+# class_name = "SessaoDurableObject"
