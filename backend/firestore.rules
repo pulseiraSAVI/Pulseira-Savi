@@ -1,0 +1,178 @@
+/**
+ * firestore.rules — SAVI (Sistema de Acesso Virtual a Informação Clínica)
+ * Fase 1 (piloto), 1 serviço de urgência.
+ *
+ * Princípio geral: negar tudo por defeito. Cada coleção é aberta apenas
+ * com a regra mínima necessária para o papel em causa.
+ *
+ * Custom claims esperadas no ID token do Firebase Auth (definidas no
+ * momento da criação da conta, nunca editáveis pelo próprio utilizador):
+ *   - papel: 'profissional' | 'admin' | 'familia'
+ *   - funcao_auditor: boolean (só relevante quando papel == 'admin')
+ *   - profissional_id: string  (id do documento em /profissionais, quando papel in ['profissional','admin'])
+ *   - conta_familia_id: string (id do documento em /contas_familia, quando papel == 'familia')
+ *
+ * IMPORTANTE — o fluxo de scan (break-glass) NUNCA passa por aqui: o
+ * frontend fala sempre com o Cloudflare Worker (backend/cloudflare-worker),
+ * que usa uma service account com acesso direto ao Firestore (via REST API/
+ * Admin SDK) e não fica sujeito a estas regras do lado do cliente. Estas
+ * regras protegem o acesso direto ao Firestore feito pelas apps de família
+ * e de administração.
+ */
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------------
+    // Funções auxiliares
+    // ------------------------------------------------------------------
+
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function papel() {
+      return request.auth.token.papel;
+    }
+
+    function isProfissionalOuAdmin() {
+      return autenticado() && (papel() == 'profissional' || papel() == 'admin');
+    }
+
+    function isAdmin() {
+      return autenticado() && papel() == 'admin';
+    }
+
+    function isAuditor() {
+      // Sub-papel dentro da equipa administradora (funcao_auditor = true).
+      return isAdmin() && request.auth.token.funcao_auditor == true;
+    }
+
+    function isFamilia() {
+      return autenticado() && papel() == 'familia';
+    }
+
+    // Verifica se a conta de família autenticada está ligada ao paciente,
+    // através da coleção familia_paciente (chave composta
+    // "{conta_familia_id}_{paciente_id}", ver firestore-schema.md).
+    function familiaLigadaAoPaciente(pacienteId) {
+      return isFamilia() &&
+        exists(/databases/$(database)/documents/familia_paciente/$(request.auth.token.conta_familia_id + '_' + pacienteId));
+    }
+
+    // Campos que a família pode escrever num documento de `pacientes`:
+    // apenas contacto/morada e pedido de revogação — nunca dados clínicos
+    // (dados clínicos vivem sempre em dados_nivel1, nunca em pacientes).
+    function apenasCamposPermitidosFamilia() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['contacto_emergencia', 'morada', 'pedido_revogacao_pulseira']);
+    }
+
+    // ------------------------------------------------------------------
+    // dados_nivel1 — dados clínicos essenciais (o coração do sistema)
+    // Documento por paciente: /dados_nivel1/{pacienteId}
+    // ------------------------------------------------------------------
+    match /dados_nivel1/{pacienteId} {
+      // A família ligada ao paciente pode LER — nunca ESCREVER, em
+      // nenhuma circunstância (nem em modo de "proposta" não verificada).
+      allow read: if isProfissionalOuAdmin() || familiaLigadaAoPaciente(pacienteId);
+
+      // Só profissionais/equipa administradora podem escrever dados
+      // clínicos (create/update/delete).
+      allow write: if isProfissionalOuAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // pacientes — dados administrativos/identificativos (não clínicos)
+    // ------------------------------------------------------------------
+    match /pacientes/{pacienteId} {
+      // Profissionais/admin: acesso total (gestão do piloto).
+      allow read, write: if isProfissionalOuAdmin();
+
+      // Família: só lê o(s) seu(s) paciente(s) e só escreve os campos
+      // administrativos explicitamente permitidos (nunca dados clínicos,
+      // que nem sequer residem nesta coleção).
+      allow read: if familiaLigadaAoPaciente(pacienteId);
+      allow update: if familiaLigadaAoPaciente(pacienteId) && apenasCamposPermitidosFamilia();
+
+      // A família nunca cria pacientes diretamente no Firestore — a
+      // criação de paciente + registo em familia_paciente é feita numa
+      // transação atómica do lado do servidor (Cloud Function), não duas
+      // escritas soltas sujeitas a regras separadas. Nesta iteração o
+      // create fica reservado a admin.
+      allow create: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // contas_familia — perfil da própria conta de família
+    // ------------------------------------------------------------------
+    match /contas_familia/{contaId} {
+      allow read, write: if isAdmin();
+      // A família só lê/edita o seu próprio documento (contacto, telefone).
+      allow read: if isFamilia() && request.auth.token.conta_familia_id == contaId;
+      allow update: if isFamilia() && request.auth.token.conta_familia_id == contaId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'telefone']);
+    }
+
+    // ------------------------------------------------------------------
+    // familia_paciente — tabela de ligação conta_familia <-> paciente
+    // ------------------------------------------------------------------
+    match /familia_paciente/{ligacaoId} {
+      allow read, write: if isProfissionalOuAdmin();
+      // A família só lê as suas próprias ligações — nunca escreve
+      // (a ligação é sempre criada/gerida pela equipa administradora,
+      // para impedir que uma conta se auto-associe a um paciente alheio).
+      allow read: if isFamilia() &&
+        resource.data.conta_familia_id == request.auth.token.conta_familia_id;
+      allow write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // acessos — audit log do break-glass (ISO 27789:2021)
+    // ------------------------------------------------------------------
+    match /acessos/{acessoId} {
+      // Escrita: NUNCA diretamente do cliente. Este registo é criado
+      // exclusivamente pelo Cloudflare Worker, autenticado com uma
+      // service account (Admin SDK), que não passa pelas Security Rules
+      // do cliente da mesma forma — mas, por segurança em profundidade,
+      // bloqueamos explicitamente qualquer escrita vinda de um ID token
+      // de utilizador final (profissional, admin ou família).
+      allow write: if false;
+
+      // Leitura: reservada a quem tem funcao_auditor==true, ou a admin.
+      allow read: if isAuditor() || isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // profissionais, lotes, pulseiras — gestão exclusiva da equipa
+    // administradora
+    // ------------------------------------------------------------------
+    match /profissionais/{profissionalId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /lotes/{loteId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /pulseiras/{pulseiraId} {
+      allow read, write: if isAdmin();
+      // Nota: o Worker consulta pulseiras pelo token durante o scan, mas
+      // fá-lo com a service account (fora do alcance destas regras). A
+      // família pode "pedir revogação" da sua pulseira através do campo
+      // pedido_revogacao_pulseira em /pacientes — nunca escrevendo aqui
+      // diretamente.
+    }
+
+    // ------------------------------------------------------------------
+    // Negação por defeito: qualquer coleção não listada acima (incluindo
+    // futuras coleções de Fase 2/3 como instituicoes, pedidos,
+    // consultas_validacao — ver firestore-schema.md) fica bloqueada.
+    // ------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
