@@ -1,4 +1,7 @@
-/* views/admin-tokens.js — gerar lote, listar pulseiras por estado, atribuir a paciente. */
+/* views/admin-tokens.js — gerar lote, listar pulseiras por estado,
+ * atribuir a paciente. Vista de superadmin (o profissional só tem o
+ * botão "Solicitar pulseira" dentro do ecrã do paciente — ver
+ * nivel1-form.js). */
 function viewAdminTokens(root) {
   "use strict";
 
@@ -30,6 +33,8 @@ function viewAdminTokens(root) {
       }).join("") + "</select></div>" +
       "<table><thead><tr><th>Token</th><th>Estado</th><th>Paciente</th><th></th></tr></thead><tbody id=\"tbody-pulseiras\"></tbody></table>" +
       "</div>";
+
+    ligarBotaoSair();
 
     document.getElementById("btn-novo-lote").addEventListener("click", function () {
       mostrarForm = !mostrarForm;
@@ -105,7 +110,7 @@ function viewAdminTokens(root) {
       '<h3 style="margin-top:0;color:var(--navy);font-size:15px;">Novo lote de pulseiras</h3>' +
       '<label>Fornecedor</label><input type="text" id="f-fornecedor" value="IdentiTag Lda.">' +
       '<label>Tipo de pulseira</label><input type="text" id="f-tipo" value="Silicone ajustável">' +
-      '<label>Modelo de chip</label><select id="f-chip"><option value="NTAG213" selected>NTAG213</option><option value="NTAG424_DNA">NTAG424_DNA</option></select>' +
+      '<label>Modelo de chip</label><select id="f-chip"><option value="NTAG213" selected>NTAG213</option></select>' +
       '<label>Preço unitário (€)</label><input type="number" step="0.01" id="f-preco" value="2.35">' +
       '<label>Quantidade</label><input type="number" id="f-qtd" value="10">' +
       '<label>Data de encomenda</label><input type="date" id="f-encomenda">' +

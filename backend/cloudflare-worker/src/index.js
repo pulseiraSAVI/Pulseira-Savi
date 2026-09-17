@@ -1,25 +1,34 @@
 /**
  * backend/cloudflare-worker/src/index.js
  * SAVI — Cloudflare Worker: lógica de break-glass, autorização e audit log.
+ * Pivô de produção, revisão de 15/09/2026 — 3 métodos de acesso
+ * (pulseira / número de utente / identidade), sem Nível 2 (eliminado).
  *
  * ⚠️ ESTE FICHEIRO É SCAFFOLDING COMENTADO PARA PRODUÇÃO, NÃO CÓDIGO
  * FUNCIONAL SEM CREDENCIAIS REAIS. Não foram inventadas chaves, segredos
  * nem endpoints reais — cada ponto que precisa de configuração real está
- * marcado com TODO. A demo funcional desta iteração vive em
- * `frontend/js/worker-sim.js` (simulação no browser).
+ * marcado com TODO. A simulação funcional desta iteração vive em
+ * `docs/js/worker-sim.js` (corre inteiramente no browser).
  *
  * Responsabilidades deste Worker (nunca do frontend, que nunca fala
- * diretamente com o Firestore para o fluxo de scan):
- *   1. Validar o ID token do Firebase Auth (autenticação do profissional).
+ * diretamente com o Firestore para o fluxo de break-glass):
+ *   1. Validar o ID token do Firebase Auth da conta que faz o acesso.
  *   2. Impor o timeout de sessão de 5 min de inatividade.
- *   3. Consultar `pulseiras` pelo token, confirmar estado === 'ativa'.
- *   4. Obter `paciente_id` e devolver `dados_nivel1` (nunca bloqueando a
- *      leitura por falta de verificação clínica).
- *   5. Escrever sempre um registo em `acessos` — mesmo em caso de negação.
- *   6. Disparar, de forma assíncrona, a notificação Resend ao titular
- *      (nunca com dados clínicos no corpo do email).
- *   7. Nível 2: exigir motivo obrigatório; devolver apenas
- *      `referencia_sistema_ext` (nunca o histórico completo).
+ *   3. Validar o PIN alfanumérico de 5 caracteres (hash — nunca texto
+ *      simples) associado à conta, para o papel 'utilizador'.
+ *   4. Localizar o paciente pelo método usado — pulseira (token opaco),
+ *      número de utente, ou identidade (nome + data de nascimento + sexo).
+ *   5. Devolver `dados_nivel1` (nunca bloqueando a leitura por falta de
+ *      verificação clínica).
+ *   6. Escrever sempre um registo em `acessos` — mesmo em caso de negação
+ *      — para os 3 métodos, sem excepção.
+ *   7. O método por identidade exige motivo obrigatório antes de mostrar
+ *      qualquer dado.
+ *   8. Disparar, de forma assíncrona, a notificação Resend ao titular/
+ *      gestor do caso (nunca com dados clínicos no corpo do email).
+ *
+ * Nível 2 não existe mais — não há nenhum handler equivalente a
+ * `/nivel2` neste ficheiro.
  *
  * Dependências previstas (adicionar ao package.json quando este Worker for
  * implementado a sério):
@@ -58,6 +67,26 @@ function jsonResponse(body, status) {
   });
 }
 
+function ErroSAVI(tipo, mensagem, status) {
+  this.tipo = tipo;
+  this.message = mensagem;
+  this.status = status || 400;
+}
+ErroSAVI.prototype = Object.create(Error.prototype);
+
+/**
+ * Calcula o hash SHA-256 (hex) de uma string, usando a Web Crypto API
+ * nativa do runtime de Workers. Usado para validar o PIN de 5 caracteres
+ * — nunca é comparado ou guardado em texto simples, mesmo aqui.
+ */
+async function sha256Hex(texto) {
+  const buf = new TextEncoder().encode(texto);
+  const hashBuf = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /**
  * Valida o ID token do Firebase Auth enviado no cabeçalho Authorization.
  * TODO: esta é a forma correta de verificar tokens do Firebase Auth num
@@ -88,38 +117,58 @@ async function verificarIdToken(request, env) {
     throw new ErroSAVI("token_invalido", "Token de autenticação inválido ou expirado.", 401);
   }
 
-  // Custom claims esperadas (definidas no momento da criação da conta —
-  // ver backend/firestore.rules para a lista completa e regras de acesso).
+  // Custom claims esperadas (definidas no momento da criação da conta pelo
+  // superadmin — ver backend/firestore.rules para a lista completa).
   return {
     uid: payload.sub,
-    papel: payload.papel, // 'profissional' | 'admin' | 'familia'
+    papeis: payload.papeis || [], // array: 'profissional' | 'utilizador' | 'superadmin'
     profissionalId: payload.profissional_id,
-    funcaoAuditor: !!payload.funcao_auditor
+    funcaoAuditor: !!payload.funcao_auditor,
+    authTime: payload.auth_time
   };
 }
 
 /**
  * Impõe o timeout de sessão de 5 min de inatividade. Numa implementação
  * real, o "último instante de atividade" tem de ser mantido nalgum lado
- * persistente entre pedidos — TODO: decidir entre (a) um valor `iat`/
- * `auth_time` recente o suficiente no próprio ID token (renovado no
- * cliente a cada interação), ou (b) um registo de sessão em Durable
- * Object / KV com TTL de 5 min. Esta função assume a opção (a) por ora.
+ * persistente entre pedidos — TODO: decidir entre (a) um valor `auth_time`
+ * recente o suficiente no próprio ID token (renovado no cliente a cada
+ * interação), ou (b) um registo de sessão em Durable Object / KV com TTL
+ * de 5 min. Esta função assume a opção (a) por ora.
  */
-function validarJanelaDeSessao(claimsToken) {
+function validarJanelaDeSessao(claims) {
   const agora = Date.now();
-  const authTimeMs = (claimsToken.authTime || 0) * 1000;
+  const authTimeMs = (claims.authTime || 0) * 1000;
   if (agora - authTimeMs > SESSAO_TIMEOUT_MS) {
     throw new ErroSAVI("sessao_expirada", "Sessão expirada por inatividade.", 401);
   }
 }
 
-function ErroSAVI(tipo, mensagem, status) {
-  this.tipo = tipo;
-  this.message = mensagem;
-  this.status = status || 400;
+/**
+ * Valida que a conta autenticada tem o papel 'utilizador' e que o PIN de
+ * 5 caracteres enviado no pedido corresponde ao pin_hash guardado em
+ * `profissionais/{profissionalId}`. Nunca compara texto simples.
+ * TODO: `env` precisaria de acesso ao Firestore já autenticado (ver
+ * firestoreGet abaixo) para ler o pin_hash real da conta.
+ */
+async function validarPapelUtilizadorEPin(env, claims, pinRecebido) {
+  if (!claims.papeis.includes("utilizador")) {
+    throw new ErroSAVI("acesso_negado", "Esta conta não tem o papel de utilizador (break-glass).", 403);
+  }
+  if (!pinRecebido) {
+    throw new ErroSAVI("pin_invalido", "PIN em falta.", 400);
+  }
+  const docProfissional = await firestoreGet(env, `profissionais/${claims.profissionalId}`);
+  const profissional = docProfissional ? extrairCampos(docProfissional) : null;
+  if (!profissional || !profissional.ativo) {
+    throw new ErroSAVI("acesso_negado", "Conta inativa ou não encontrada.", 403);
+  }
+  const hashRecebido = await sha256Hex(pinRecebido);
+  if (hashRecebido !== profissional.pin_hash) {
+    throw new ErroSAVI("pin_invalido", "PIN incorreto.", 401);
+  }
+  return profissional;
 }
-ErroSAVI.prototype = Object.create(Error.prototype);
 
 // ---------------------------------------------------------------------
 // Acesso ao Firestore via REST API
@@ -128,9 +177,7 @@ ErroSAVI.prototype = Object.create(Error.prototype);
 // acesso via REST API do Firestore (autenticado com uma service account,
 // gerando um access token OAuth2 — não implementado aqui, ver TODO
 // abaixo) em vez do Admin SDK completo, que não corre nativamente em
-// Cloudflare Workers. Alternativa a avaliar: usar a biblioteca
-// "firebase-rest-firestore" ou construir os pedidos manualmente com
-// fetch(), como esboçado abaixo.
+// Cloudflare Workers.
 
 const FIRESTORE_BASE_URL = (projectId) =>
   `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
@@ -160,65 +207,80 @@ async function firestoreGet(env, path) {
   return resp.json();
 }
 
-async function firestoreQueryPulseiraPorToken(env, token) {
+async function firestoreQueryUm(env, collectionId, fieldPath, value) {
   const accessToken = await obterAccessTokenServiceAccount(env);
   const body = {
     structuredQuery: {
-      from: [{ collectionId: "pulseiras" }],
+      from: [{ collectionId }],
       where: {
         fieldFilter: {
-          field: { fieldPath: "token" },
+          field: { fieldPath },
           op: "EQUAL",
-          value: { stringValue: token }
+          value: { stringValue: value }
         }
       },
       limit: 1
     }
   };
-  const resp = await fetch(
-    `${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}:runQuery`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(body)
-    }
-  );
-  if (!resp.ok) throw new ErroSAVI("erro", "Erro ao consultar pulseiras.", 502);
+  const resp = await fetch(`${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}:runQuery`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!resp.ok) throw new ErroSAVI("erro", `Erro ao consultar ${collectionId}.`, 502);
   const resultados = await resp.json();
   const doc = resultados.find((r) => r.document);
   return doc ? doc.document : null;
 }
 
+/**
+ * Método de acesso por identidade: nome completo + data de nascimento +
+ * sexo. Sem índice composto na Fase 1 (≤50 pacientes) — lê a coleção toda
+ * e filtra em memória. TODO: se o piloto crescer, criar índice composto
+ * e usar uma query estruturada com 3 fieldFilters em AND.
+ */
+async function firestoreQueryPorIdentidade(env, nomeCompleto, dataNascimento, sexo) {
+  const accessToken = await obterAccessTokenServiceAccount(env);
+  const resp = await fetch(`${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}/pacientes`, {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
+  if (!resp.ok) throw new ErroSAVI("erro", "Erro ao consultar pacientes.", 502);
+  const resultado = await resp.json();
+  const docs = resultado.documents || [];
+  const alvo = docs.find((doc) => {
+    const campos = extrairCampos(doc);
+    return (
+      (campos.nome || "").trim().toLowerCase() === nomeCompleto.trim().toLowerCase() &&
+      campos.data_nascimento === dataNascimento &&
+      campos.sexo === sexo
+    );
+  });
+  return alvo || null;
+}
+
 async function firestoreCreate(env, collectionId, fields) {
   const accessToken = await obterAccessTokenServiceAccount(env);
-  const resp = await fetch(
-    `${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}/${collectionId}`,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({ fields })
-    }
-  );
+  const resp = await fetch(`${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}/${collectionId}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ fields })
+  });
   if (!resp.ok) throw new ErroSAVI("erro", "Erro ao escrever no Firestore.", 502);
   return resp.json();
 }
 
 // ---------------------------------------------------------------------
-// Audit log — escreve SEMPRE em `acessos`, mesmo em negações (passo 6)
+// Audit log — escreve SEMPRE em `acessos`, mesmo em negações (passo 6),
+// para os 3 métodos de acesso.
 // ---------------------------------------------------------------------
 
-async function registarAcesso(env, { pulseiraId, profissionalId, nivelAcedido, motivo, servico, ipOuLocalizacao }) {
-  // Alinhado com o schema em backend/firestore-schema.md (coleção `acessos`).
+async function registarAcesso(env, { metodoAcesso, pulseiraId, pacienteId, utilizadorId, nivelAcedido, motivo, servico, ipOuLocalizacao }) {
   return firestoreCreate(env, "acessos", {
+    metodo_acesso: { stringValue: metodoAcesso }, // 'pulseira' | 'numero_utente' | 'identidade'
     pulseira_id: pulseiraId ? { stringValue: pulseiraId } : { nullValue: null },
-    profissional_id: profissionalId ? { stringValue: profissionalId } : { nullValue: null },
-    nivel_acedido: { stringValue: nivelAcedido }, // 'nivel_1' | 'nivel_2' | 'negado'
+    paciente_id: pacienteId ? { stringValue: pacienteId } : { nullValue: null },
+    utilizador_id: utilizadorId ? { stringValue: utilizadorId } : { nullValue: null },
+    nivel_acedido: { stringValue: nivelAcedido }, // 'nivel_1' | 'negado' — nivel_2 removido
     motivo: motivo ? { stringValue: motivo } : { nullValue: null },
     servico: servico ? { stringValue: servico } : { nullValue: null },
     ip_ou_localizacao: ipOuLocalizacao ? { stringValue: ipOuLocalizacao } : { nullValue: null },
@@ -232,192 +294,214 @@ async function registarAcesso(env, { pulseiraId, profissionalId, nivelAcedido, m
 // ---------------------------------------------------------------------
 
 /**
- * Notifica o titular/família do acesso de emergência (art. 29.º n.º 6,
- * Lei 58/2019). Disparado sem `await` no fluxo principal para não
- * bloquear a resposta ao profissional — usar `ctx.waitUntil()` no
- * handler do Worker para garantir que a Promise corre até ao fim mesmo
- * depois da resposta ser enviada.
+ * Notifica o gestor do caso/família do acesso de emergência (art. 29.º
+ * n.º 6, Lei 58/2019). Disparado com `ctx.waitUntil()` para não bloquear
+ * a resposta ao utilizador.
  *
  * TODO: configurar RESEND_API_KEY como secret (`wrangler secret put
- * RESEND_API_KEY`) antes de ativar este código. Manter comentado /
- * stub até essa configuração existir, para não falhar silenciosamente
- * em produção.
+ * RESEND_API_KEY`) antes de ativar este código.
  */
-async function notificarTitularResend(env, { emailContacto, nomePaciente, nivel }) {
-  // Exemplo de payload (NUNCA incluir dados clínicos — alergias, diagnóstico,
-  // medicação, etc. — apenas o facto de que houve um acesso):
+async function notificarTitularResend(env, { emailContacto, nomePaciente, metodoAcesso }) {
+  // Exemplo de payload (NUNCA incluir dados clínicos — alergias, condição
+  // crítica, medicação, etc. — apenas o facto de que houve um acesso):
   //
   // await fetch("https://api.resend.com/emails", {
   //   method: "POST",
-  //   headers: {
-  //     authorization: `Bearer ${env.RESEND_API_KEY}`,
-  //     "content-type": "application/json"
-  //   },
+  //   headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
   //   body: JSON.stringify({
   //     from: "SAVI <notificacoes@savi-piloto.pt>", // TODO: domínio real verificado no Resend
   //     to: emailContacto,
-  //     subject: "SAVI — acesso de emergência à pulseira",
-  //     text:
-  //       `Houve um acesso de emergência (${nivel}) aos dados de ${nomePaciente} ` +
-  //       `em ${new Date().toLocaleString("pt-PT")}. Este é um alerta automático — ` +
-  //       "não contém dados clínicos."
+  //     subject: "SAVI — acesso de emergência ao registo clínico",
+  //     text: `Houve um acesso de emergência (método: ${metodoAcesso}) aos dados de ${nomePaciente} ` +
+  //       `em ${new Date().toLocaleString("pt-PT")}. Este é um alerta automático — não contém dados clínicos.`
   //   })
   // });
   //
-  // TODO: implementar a chamada real quando RESEND_API_KEY estiver
-  // configurado; por agora, este é apenas o esboço documentado.
+  // TODO: implementar a chamada real quando RESEND_API_KEY estiver configurado.
   return Promise.resolve();
 }
 
 // ---------------------------------------------------------------------
-// POST /scan
+// Núcleo comum aos 3 métodos: dado um documento de paciente já
+// localizado, devolve dados_nivel1 + regista o acesso + notifica.
 // ---------------------------------------------------------------------
 
-async function handleScan(request, env, ctx) {
-  const claims = await verificarIdToken(request, env);
-  validarJanelaDeSessao(claims);
-
-  const body = await request.json().catch(() => ({}));
-  const token = body.token;
-  const servico = body.servico || null;
-
-  if (!token) {
-    throw new ErroSAVI("token_invalido", "Token de pulseira em falta no pedido.", 400);
-  }
-
-  const docPulseira = await firestoreQueryPulseiraPorToken(env, token);
-
-  if (!docPulseira) {
-    // Passo 6: regista SEMPRE, mesmo em negação por token desconhecido.
-    ctx.waitUntil(
-      registarAcesso(env, {
-        pulseiraId: null,
-        profissionalId: claims.profissionalId,
-        nivelAcedido: "negado",
-        motivo: `Token inválido: ${token}`,
-        servico,
-        ipOuLocalizacao: request.headers.get("cf-connecting-ip")
-      })
-    );
-    throw new ErroSAVI("token_invalido", "Esta pulseira não está registada no sistema.", 404);
-  }
-
-  const pulseira = extrairCampos(docPulseira); // TODO: implementar parser de Firestore Document -> objeto JS simples
-  const pulseiraId = docPulseira.name.split("/").pop();
-
-  if (pulseira.estado !== "ativa") {
-    ctx.waitUntil(
-      registarAcesso(env, {
-        pulseiraId,
-        profissionalId: claims.profissionalId,
-        nivelAcedido: "negado",
-        motivo: `Pulseira em estado '${pulseira.estado}'`,
-        servico,
-        ipOuLocalizacao: request.headers.get("cf-connecting-ip")
-      })
-    );
-    throw new ErroSAVI("pulseira_revogada", "Esta pulseira não está ativa.", 403);
-  }
-
-  const dadosNivel1 = await firestoreGet(env, `dados_nivel1/${pulseira.paciente_id}`);
-  const paciente = await firestoreGet(env, `pacientes/${pulseira.paciente_id}`);
+async function responderComNivel1(env, ctx, { metodoAcesso, pulseiraId, docPaciente, utilizadorId, servico, motivo, ip }) {
+  const pacienteId = docPaciente.name.split("/").pop();
+  const paciente = extrairCampos(docPaciente);
+  const dadosNivel1 = await firestoreGet(env, `dados_nivel1/${pacienteId}`);
 
   const acesso = await registarAcesso(env, {
-    pulseiraId,
-    profissionalId: claims.profissionalId,
+    metodoAcesso,
+    pulseiraId: pulseiraId || null,
+    pacienteId,
+    utilizadorId,
     nivelAcedido: "nivel_1",
-    motivo: null,
+    motivo: motivo || null,
     servico,
-    ipOuLocalizacao: request.headers.get("cf-connecting-ip")
+    ipOuLocalizacao: ip
   });
 
-  // Passo 7: notificação assíncrona, nunca bloqueia a resposta.
   ctx.waitUntil(
     notificarTitularResend(env, {
-      emailContacto: null, // TODO: obter da conta de família ligada ao paciente
-      nomePaciente: paciente ? extrairCampos(paciente).nome : "paciente",
-      nivel: "Nível 1"
+      emailContacto: null, // TODO: obter do gestor do caso / contacto de familiares do paciente
+      nomePaciente: paciente.nome,
+      metodoAcesso
     })
   );
 
   return jsonResponse({
-    paciente: paciente ? extrairCampos(paciente) : null,
+    paciente,
     dados: dadosNivel1 ? extrairCampos(dadosNivel1) : null,
     acessoId: acesso.name ? acesso.name.split("/").pop() : null
   });
 }
 
+async function negarERegistar(env, ctx, { metodoAcesso, pulseiraId, utilizadorId, servico, motivo, ip, erroTipo, erroMensagem, erroStatus }) {
+  ctx.waitUntil(
+    registarAcesso(env, {
+      metodoAcesso,
+      pulseiraId: pulseiraId || null,
+      pacienteId: null,
+      utilizadorId,
+      nivelAcedido: "negado",
+      motivo: motivo || null,
+      servico,
+      ipOuLocalizacao: ip
+    })
+  );
+  throw new ErroSAVI(erroTipo, erroMensagem, erroStatus);
+}
+
 // ---------------------------------------------------------------------
-// POST /nivel2
+// POST /acesso/pulseira — método 1: leitura de pulseira (NFC ou QR)
 // ---------------------------------------------------------------------
 
-async function handleNivel2(request, env, ctx) {
+async function handleAcessoPulseira(request, env, ctx) {
   const claims = await verificarIdToken(request, env);
   validarJanelaDeSessao(claims);
 
   const body = await request.json().catch(() => ({}));
-  const motivo = (body.motivo || "").trim();
-  const pulseiraId = body.pulseiraId;
+  const token = body.token;
+  const pin = body.pin;
   const servico = body.servico || null;
+  const ip = request.headers.get("cf-connecting-ip");
+
+  const profissional = await validarPapelUtilizadorEPin(env, claims, pin);
+
+  if (!token) {
+    throw new ErroSAVI("token_invalido", "Token de pulseira em falta no pedido.", 400);
+  }
+
+  const docPulseira = await firestoreQueryUm(env, "pulseiras", "token", token);
+  if (!docPulseira) {
+    return negarERegistar(env, ctx, {
+      metodoAcesso: "pulseira", pulseiraId: null, utilizadorId: claims.profissionalId, servico, ip,
+      erroTipo: "token_invalido", erroMensagem: "Esta pulseira não está registada no sistema.", erroStatus: 404
+    });
+  }
+  const pulseira = extrairCampos(docPulseira);
+  const pulseiraId = docPulseira.name.split("/").pop();
+
+  if (pulseira.estado !== "ativa") {
+    return negarERegistar(env, ctx, {
+      metodoAcesso: "pulseira", pulseiraId, utilizadorId: claims.profissionalId, servico, ip,
+      erroTipo: "pulseira_revogada", erroMensagem: "Esta pulseira não está ativa.", erroStatus: 403
+    });
+  }
+
+  const docPaciente = await firestoreGet(env, `pacientes/${pulseira.paciente_id}`);
+  if (!docPaciente) {
+    return negarERegistar(env, ctx, {
+      metodoAcesso: "pulseira", pulseiraId, utilizadorId: claims.profissionalId, servico, ip,
+      erroTipo: "erro", erroMensagem: "Pulseira ativa sem paciente associado (inconsistência de dados).", erroStatus: 500
+    });
+  }
+
+  return responderComNivel1(env, ctx, {
+    metodoAcesso: "pulseira", pulseiraId, docPaciente, utilizadorId: claims.profissionalId, servico, motivo: null, ip
+  });
+}
+
+// ---------------------------------------------------------------------
+// POST /acesso/numero-utente — método 2
+// ---------------------------------------------------------------------
+
+async function handleAcessoNumeroUtente(request, env, ctx) {
+  const claims = await verificarIdToken(request, env);
+  validarJanelaDeSessao(claims);
+
+  const body = await request.json().catch(() => ({}));
+  const numeroUtente = (body.numero_utente || "").trim();
+  const pin = body.pin;
+  const servico = body.servico || null;
+  const ip = request.headers.get("cf-connecting-ip");
+
+  await validarPapelUtilizadorEPin(env, claims, pin);
+
+  if (!numeroUtente) {
+    throw new ErroSAVI("dados_invalidos", "Número de utente em falta.", 400);
+  }
+
+  const docPaciente = await firestoreQueryUm(env, "pacientes", "numero_utente", numeroUtente);
+  if (!docPaciente) {
+    return negarERegistar(env, ctx, {
+      metodoAcesso: "numero_utente", pulseiraId: null, utilizadorId: claims.profissionalId, servico, ip,
+      erroTipo: "nao_encontrado", erroMensagem: "Não foi encontrado nenhum paciente com este número de utente.", erroStatus: 404
+    });
+  }
+
+  return responderComNivel1(env, ctx, {
+    metodoAcesso: "numero_utente", pulseiraId: null, docPaciente, utilizadorId: claims.profissionalId, servico, motivo: null, ip
+  });
+}
+
+// ---------------------------------------------------------------------
+// POST /acesso/identidade — método 3: nome completo + data de nascimento
+// + sexo. Exige motivo obrigatório (regra não negociável, CLAUDE.md).
+// ---------------------------------------------------------------------
+
+async function handleAcessoIdentidade(request, env, ctx) {
+  const claims = await verificarIdToken(request, env);
+  validarJanelaDeSessao(claims);
+
+  const body = await request.json().catch(() => ({}));
+  const nomeCompleto = (body.nome_completo || "").trim();
+  const dataNascimento = body.data_nascimento;
+  const sexo = body.sexo;
+  const motivo = (body.motivo || "").trim();
+  const pin = body.pin;
+  const servico = body.servico || null;
+  const ip = request.headers.get("cf-connecting-ip");
+
+  await validarPapelUtilizadorEPin(env, claims, pin);
 
   if (!motivo) {
-    // Nível 2 exige motivo obrigatório — regra não negociável (CLAUDE.md).
-    return jsonResponse(
-      { erro: "motivo_obrigatorio", mensagem: "É obrigatório indicar um motivo clínico para aceder ao Nível 2." },
-      400
-    );
+    // Motivo obrigatório ANTES de mostrar qualquer dado — regra não
+    // negociável, igual à antiga exigência do Nível 2 (agora eliminado),
+    // aplicada aqui ao método de acesso por identidade.
+    throw new ErroSAVI("motivo_obrigatorio", "É obrigatório indicar um motivo para o acesso por identidade.", 400);
+  }
+  if (!nomeCompleto || !dataNascimento || !sexo) {
+    throw new ErroSAVI("dados_invalidos", "Nome completo, data de nascimento e sexo são obrigatórios.", 400);
   }
 
-  const docPulseira = await firestoreGet(env, `pulseiras/${pulseiraId}`);
-  const pulseira = docPulseira ? extrairCampos(docPulseira) : null;
-
-  if (!pulseira || pulseira.estado !== "ativa") {
-    ctx.waitUntil(
-      registarAcesso(env, {
-        pulseiraId,
-        profissionalId: claims.profissionalId,
-        nivelAcedido: "negado",
-        motivo,
-        servico,
-        ipOuLocalizacao: request.headers.get("cf-connecting-ip")
-      })
-    );
-    throw new ErroSAVI("pulseira_revogada", "Pulseira não está ativa.", 403);
+  const docPaciente = await firestoreQueryPorIdentidade(env, nomeCompleto, dataNascimento, sexo);
+  if (!docPaciente) {
+    return negarERegistar(env, ctx, {
+      metodoAcesso: "identidade", pulseiraId: null, utilizadorId: claims.profissionalId, servico, motivo, ip,
+      erroTipo: "nao_encontrado", erroMensagem: "Não foi encontrado nenhum paciente com esta identidade.", erroStatus: 404
+    });
   }
 
-  const paciente = await firestoreGet(env, `pacientes/${pulseira.paciente_id}`);
-  const pacienteFields = paciente ? extrairCampos(paciente) : {};
-
-  await registarAcesso(env, {
-    pulseiraId,
-    profissionalId: claims.profissionalId,
-    nivelAcedido: "nivel_2",
-    motivo,
-    servico,
-    ipOuLocalizacao: request.headers.get("cf-connecting-ip")
-  });
-
-  ctx.waitUntil(
-    notificarTitularResend(env, {
-      emailContacto: null, // TODO: idem handleScan
-      nomePaciente: pacienteFields.nome || "paciente",
-      nivel: `Nível 2 (motivo: ${motivo})`
-    })
-  );
-
-  // Nunca o histórico completo — apenas a referência textual (regra não
-  // negociável, CLAUDE.md).
-  return jsonResponse({
-    referencia_sistema_ext: pacienteFields.referencia_sistema_ext || "Sem referência registada no sistema do hospital."
+  return responderComNivel1(env, ctx, {
+    metodoAcesso: "identidade", pulseiraId: null, docPaciente, utilizadorId: claims.profissionalId, servico, motivo, ip
   });
 }
 
 // ---------------------------------------------------------------------
 // Utilitário: converte um Document do formato REST do Firestore
 // ({ fields: { campo: { stringValue: ... } } }) num objeto JS simples.
-// TODO: cobrir todos os tipos de valor usados no schema (stringValue,
-// doubleValue, integerValue, booleanValue, timestampValue, nullValue,
-// mapValue) — versão mínima ilustrativa abaixo, não exaustiva.
 // ---------------------------------------------------------------------
 
 function extrairCampos(doc) {
@@ -446,12 +530,17 @@ export default {
     const url = new URL(request.url);
 
     try {
-      if (request.method === "POST" && url.pathname === "/scan") {
-        return await handleScan(request, env, ctx);
+      if (request.method === "POST" && url.pathname === "/acesso/pulseira") {
+        return await handleAcessoPulseira(request, env, ctx);
       }
-      if (request.method === "POST" && url.pathname === "/nivel2") {
-        return await handleNivel2(request, env, ctx);
+      if (request.method === "POST" && url.pathname === "/acesso/numero-utente") {
+        return await handleAcessoNumeroUtente(request, env, ctx);
       }
+      if (request.method === "POST" && url.pathname === "/acesso/identidade") {
+        return await handleAcessoIdentidade(request, env, ctx);
+      }
+      // Nota: não existe /nivel2 nem qualquer rota equivalente — Nível 2
+      // foi eliminado por completo desta revisão (CLAUDE.md).
       return jsonResponse({ erro: "nao_encontrado", mensagem: "Rota desconhecida." }, 404);
     } catch (e) {
       if (e instanceof ErroSAVI) {

@@ -1,6 +1,8 @@
 /* views/admin-auditoria.js
  * Secção Segurança/Auditoria — só visível para quem tem funcao_auditor=true
- * (aplicado também na guarda de rota em router.js). Lista a tabela `acessos`.
+ * (aplicado também na guarda de rota em router.js). Lista a tabela
+ * `acessos`, agora cobrindo os 3 métodos de acesso (pulseira/número de
+ * utente/identidade) — não só pulseira.
  */
 function viewAdminAuditoria(root) {
   "use strict";
@@ -10,26 +12,36 @@ function viewAdminAuditoria(root) {
   var pulseiras = mockdb.listPulseiras();
   var profissionais = mockdb.listProfissionais();
 
-  function nomeProfissional(id) {
+  function nomeUtilizador(id) {
     var p = profissionais.find(function (x) { return x.id === id; });
+    return p ? p.nome : "—";
+  }
+  function nomePaciente(id) {
+    var p = id ? mockdb.getPaciente(id) : null;
     return p ? p.nome : "—";
   }
   function tokenPulseira(id) {
     var p = pulseiras.find(function (x) { return x.id === id; });
     return p ? p.token : "—";
   }
+  function rotuloMetodo(m) {
+    var mapa = { pulseira: "Pulseira", numero_utente: "Número de utente", identidade: "Identidade" };
+    return mapa[m] || m || "—";
+  }
 
   root.innerHTML = adminNav(sessao, "auditoria") +
     '<div class="page">' +
     "<h1>Segurança / Auditoria</h1>" +
     '<p class="subtitle">Registo completo de acessos (`acessos`), incluindo negações — alinhado com ISO 27789:2021. ' + acessos.length + " registo(s).</p>" +
-    '<table><thead><tr><th>Data/hora</th><th>Nível</th><th>Profissional</th><th>Pulseira</th><th>Serviço</th><th>Motivo</th><th>Notificação titular</th></tr></thead><tbody id="tbody"></tbody></table>' +
+    '<table><thead><tr><th>Data/hora</th><th>Método</th><th>Resultado</th><th>Utilizador</th><th>Paciente</th><th>Pulseira</th><th>Serviço</th><th>Motivo</th><th>Notificação</th></tr></thead><tbody id="tbody"></tbody></table>' +
     "</div>";
+
+  ligarBotaoSair();
 
   var tbody = document.getElementById("tbody");
   if (acessos.length === 0) {
     var tr0 = document.createElement("tr");
-    tr0.innerHTML = '<td colspan="7"><div class="empty-state">Sem acessos registados.</div></td>';
+    tr0.innerHTML = '<td colspan="9"><div class="empty-state">Sem acessos registados.</div></td>';
     tbody.appendChild(tr0);
   }
   acessos.forEach(function (a) {
@@ -37,9 +49,11 @@ function viewAdminAuditoria(root) {
     var d = new Date(a.acedido_em);
     tr.innerHTML =
       "<td>" + d.toLocaleString("pt-PT") + "</td>" +
-      '<td><span class="badge ' + (a.nivel_acedido === "negado" ? "revogado" : "ativo") + '">' + a.nivel_acedido + "</span></td>" +
-      "<td>" + nomeProfissional(a.profissional_id) + "</td>" +
-      "<td>" + tokenPulseira(a.pulseira_id) + "</td>" +
+      "<td>" + rotuloMetodo(a.metodo_acesso) + "</td>" +
+      '<td><span class="badge ' + (a.nivel_acedido === "negado" ? "revogado" : "ativo") + '">' + (a.nivel_acedido === "negado" ? "negado" : "nível 1") + "</span></td>" +
+      "<td>" + nomeUtilizador(a.utilizador_id) + "</td>" +
+      "<td>" + nomePaciente(a.paciente_id) + "</td>" +
+      "<td>" + (a.pulseira_id ? tokenPulseira(a.pulseira_id) : "—") + "</td>" +
       "<td>" + (a.servico || "—") + "</td>" +
       "<td>" + (a.motivo || "—") + "</td>" +
       "<td>" + (a.notificado_titular_em ? new Date(a.notificado_titular_em).toLocaleString("pt-PT") : "pendente") + "</td>";

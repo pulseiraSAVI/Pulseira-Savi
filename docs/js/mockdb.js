@@ -1,26 +1,33 @@
 /* mockdb.js
- * "Firestore" simulado para a demo SAVI.
+ * "Firestore" simulado para o SAVI — pivô de produção, revisão de
+ * 15/09/2026. Substitui por completo o modelo anterior (família/
+ * profissional clínico/equipa administradora/auditor).
  *
- * Guarda as coleções ativas da Fase 1 num único objeto persistido em
- * localStorage (chave "savi_db"), espelhando as coleções Firestore
+ * Guarda as coleções ativas nesta revisão num único objeto persistido em
+ * localStorage (chave "savi_db_v2"), espelhando as coleções Firestore
  * descritas em backend/firestore-schema.md:
- *   pacientes, dados_nivel1, pulseiras, lotes, contas_familia,
- *   familia_paciente, profissionais, acessos.
+ *   pacientes, dados_nivel1, documentos, pulseiras, lotes, profissionais,
+ *   acessos.
+ * `contas_familia` e `familia_paciente` existem no schema só por
+ * referência histórica (família suspensa) — não são usadas aqui.
  *
  * IMPORTANTE — este ficheiro simula a base de dados, não o Worker.
  * As funções aqui aplicam as mesmas regras de negócio que as Firestore
  * Security Rules reais (backend/firestore.rules) impõem no servidor:
- *   - a família NUNCA escreve em dados_nivel1 (nem em modo de proposta);
- *   - dados clínicos só são escritos por profissional/admin;
- *   - acessos só é escrito pelo fluxo de scan (worker-sim.js).
- * Isto é só para a demo correr sem backend; num ambiente real estas
+ *   - dados clínicos só são escritos pelo profissional que criou o
+ *     paciente (ou pelo superadmin);
+ *   - um profissional só vê/edita os pacientes que ele próprio criou;
+ *   - o superadmin não tem essa restrição;
+ *   - acessos só é escrito pelo fluxo de break-glass (worker-sim.js);
+ *   - o PIN nunca é guardado em texto simples (ver hash-util.js).
+ * Isto é só para a simulação correr sem backend; num ambiente real estas
  * regras vivem SEMPRE no servidor (Firestore Rules + Worker), nunca
  * apenas no cliente.
  */
 (function (global) {
   "use strict";
 
-  var DB_KEY = "savi_db";
+  var DB_KEY = "savi_db_v2";
 
   function uuid() {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
@@ -34,13 +41,27 @@
     return new Date().toISOString();
   }
 
+  // Hashes SHA-256 pré-calculados (via shell, nunca inventados no cliente)
+  // dos PINs de demonstração — ver README.md para a lista de credenciais.
+  // Nunca guardar o PIN em texto simples, mesmo aqui.
+  var SEED_PIN_HASHES = {
+    "A1B2C": "79a36533a678d71678afc93a94b46b9a55a778049586edd3debf303055112bda",
+    "T4G05": "b12f21a5dc1e6cb6b8f5de15678016c927f0204fc5be79f569473b10b2b9076e",
+    "M3D1C": "60704f659f1b92e27393eec3a27b4d9936bd6fc30e9da6743a5d8dc40b569226",
+    "9XZQ7": "e9ec81782725428399b5d02c6f318bb4382290d83d11df082167e9fdaa3cad93",
+    "7YTR2": "c4c6b2fc01390479fadd0dd5e7c7985c786f8e01d6ce062db44617ca94e9c7fb"
+  };
+
   function seed() {
     var db = {
       lotes: [],
       pacientes: [],
       dados_nivel1: [],
+      documentos: [],
       pulseiras: [],
       profissionais: [],
+      // Presentes só por paridade com o schema (família suspensa) — nunca
+      // preenchidas nem lidas nesta revisão.
       contas_familia: [],
       familia_paciente: [],
       acessos: []
@@ -61,158 +82,166 @@
       criado_em: nowISO()
     });
 
-    // ---- Profissionais ----
+    // ---- Profissionais / utilizadores / superadmin ----
     var drAnaId = "prof-ana-silva";
     db.profissionais.push({
       id: drAnaId,
       nome: "Dr.ª Ana Silva",
       credencial_ordem: "12345M",
-      servico: "Urgência Pediátrica",
-      tipo_relacao: "interno",
-      instituicao_id: null,
-      mfa_ativo: true,
+      pin_hash: SEED_PIN_HASHES["A1B2C"],
+      papeis: ["profissional", "utilizador"],
       funcao_auditor: false,
+      servico: "Urgência Pediátrica",
+      especialidade: "Pediatria",
+      instituicao_servico: "Hospital Pediátrico de referência — Urgência Pediátrica",
+      telefone_institucional: "+351 21 000 1111",
       ativo: true,
-      criado_em: nowISO(),
-      // apenas para a demo: password simulada (não existiria assim num sistema real)
-      _password_demo: "demo123"
+      criado_em: nowISO()
     });
 
-    var adminAuditorId = "prof-admin-auditor";
+    var drTiagoId = "prof-tiago-mendes";
     db.profissionais.push({
-      id: adminAuditorId,
+      id: drTiagoId,
+      nome: "Dr. Tiago Mendes",
+      credencial_ordem: "54321C",
+      pin_hash: SEED_PIN_HASHES["T4G05"],
+      papeis: ["profissional"],
+      funcao_auditor: false,
+      servico: "Nefrologia",
+      especialidade: "Nefrologia",
+      instituicao_servico: "Hospital de referência de Nefrologia — Consulta de Nefrologia",
+      telefone_institucional: "+351 22 000 0000",
+      ativo: true,
+      criado_em: nowISO()
+    });
+
+    var enfMarcoId = "prof-marco-pinto";
+    db.profissionais.push({
+      id: enfMarcoId,
+      nome: "Enf.º Marco Pinto",
+      credencial_ordem: "99887E",
+      pin_hash: SEED_PIN_HASHES["M3D1C"],
+      papeis: ["utilizador"],
+      funcao_auditor: false,
+      servico: "Urgência Geral",
+      especialidade: "",
+      instituicao_servico: "",
+      telefone_institucional: "",
+      ativo: true,
+      criado_em: nowISO()
+    });
+
+    var ruiId = "prof-rui-ferreira";
+    db.profissionais.push({
+      id: ruiId,
       nome: "Rui Ferreira",
       credencial_ordem: "ADMIN01",
-      servico: "Equipa Administradora SAVI",
-      tipo_relacao: "interno",
-      instituicao_id: null,
-      mfa_ativo: true,
+      pin_hash: SEED_PIN_HASHES["9XZQ7"],
+      papeis: ["superadmin"],
       funcao_auditor: true,
+      servico: "Equipa gestora do projeto SAVI",
+      especialidade: "",
+      instituicao_servico: "",
+      telefone_institucional: "",
       ativo: true,
-      criado_em: nowISO(),
-      _password_demo: "admin123",
-      _papel: "admin"
+      criado_em: nowISO()
     });
 
-    var adminSimplesId = "prof-admin-simples";
+    var carlaId = "prof-carla-nunes";
     db.profissionais.push({
-      id: adminSimplesId,
+      id: carlaId,
       nome: "Carla Nunes",
       credencial_ordem: "ADMIN02",
-      servico: "Equipa Administradora SAVI",
-      tipo_relacao: "interno",
-      instituicao_id: null,
-      mfa_ativo: true,
+      pin_hash: SEED_PIN_HASHES["7YTR2"],
+      papeis: ["superadmin"],
       funcao_auditor: false,
+      servico: "Equipa gestora do projeto SAVI",
+      especialidade: "",
+      instituicao_servico: "",
+      telefone_institucional: "",
       ativo: true,
-      criado_em: nowISO(),
-      _password_demo: "admin123",
-      _papel: "admin"
+      criado_em: nowISO()
     });
 
-    // ---- Conta de família demo ----
-    var contaSofiaId = "fam-sofia-sousa";
-    db.contas_familia.push({
-      id: contaSofiaId,
-      nome: "Sofia Sousa",
-      email: "sofia.sousa@exemplo.pt",
-      telefone: "+351 912 345 678",
-      relacao: "mãe",
-      firebase_uid: "uid-sofia-demo",
-      ativo: true,
-      criado_em: nowISO(),
-      _password_demo: "familia123"
-    });
+    function gestorDoCaso(prof) {
+      return {
+        nome: prof.nome,
+        credencial_ordem: prof.credencial_ordem,
+        especialidade: prof.especialidade,
+        instituicao_servico: prof.instituicao_servico,
+        telefone_institucional: prof.telefone_institucional
+      };
+    }
 
-    // ---- Paciente Matilde Sousa (réplica do mockup de referência) ----
+    // ---- Paciente Matilde Sousa (pediátrica, epilepsia) ----
     var matildeId = "pac-matilde-sousa";
+    var drAna = db.profissionais[0];
     db.pacientes.push({
       id: matildeId,
       nome: "Matilde Sousa",
-      data_nascimento: "2022-03-14",
+      data_nascimento: "2023-11-02",
+      sexo: "F",
+      numero_utente: "3001445982",
+      morada: "Rua das Amoreiras, 12, 3º Dto., 1900-000 Lisboa",
+      contacto_familia: "+351 912 345 678 (mãe — Sofia Sousa)",
       contacto_emergencia: "+351 912 345 678 (mãe — Sofia Sousa)",
-      referencia_sistema_ext: "processo nº 48213/2026, Hospital Pediátrico de referência",
+      gestor_do_caso: gestorDoCaso(drAna),
       estado_consentimento: "ativo",
-      consentimento_prestado_por: "tutor_legal",
-      consentimento_nome_tutor: "Sofia Sousa",
-      consentimento_documento_ref: "CC 000000000 ZZ0",
-      consentimento_data: "2026-04-02",
-      origem: "piloto",
-      profissional_solicitante_id: null,
+      criado_por_id: drAnaId,
       criado_em: nowISO()
     });
-    db.familia_paciente.push({ conta_familia_id: contaSofiaId, paciente_id: matildeId, criado_em: nowISO() });
-
     db.dados_nivel1.push({
       paciente_id: matildeId,
-      peso_kg: 16.2,
-      altura_cm: 102.5,
-      biometria_registada_em: "2026-07-10",
+      peso_kg: 12.4,
+      altura_cm: 88,
+      biometria_registada_em: "2026-08-10",
       alergias: "Penicilina — reação grave (edema)",
-      grupo_sanguineo: "O Rh+",
-      diagnosticos_ativos: "Epilepsia focal (G40.2)",
-      terapeutica: "Ácido valproico 250mg, via oral, 2x/dia (08h/20h)",
-      medicacao_cronica: "Ácido valproico 250mg, 2x/dia",
-      farmacos_contraindicados: "Ibuprofeno (interação com anticonvulsivante)",
+      condicao_critica: "Epilepsia focal (G40.2)",
+      esquema_dose: "Ácido valproico 250mg, via oral, 2x/dia (08h/20h)",
+      medicacao_contraindicada: "Ibuprofeno (interação com anticonvulsivante)",
       limitacao_terapeutica: "nao",
-      ventilacao_invasiva: "nao",
-      vni: "nao",
-      tecnicas_dialiticas: "nao",
       esquema_atuacao_crise: "Convulsão → Diazepam retal 5mg. Se não ceder em 5 min, contactar 112.",
-      hospital_referencia: "Hospital Pediátrico de referência",
-      hospital_referencia_contacto: "+351 21 000 0000",
-      vacinas: "Atualizado — PNV em dia",
+      notas: "Pais treinados na administração de diazepam retal.",
+      medicacao_cronica: "Ácido valproico 250mg, via oral, 2x/dia (08h/20h)",
       escrito_por_id: drAnaId,
       escrito_em: nowISO(),
       verificado_por_id: drAnaId,
-      verificado_em: "2026-07-10T09:00:00.000Z",
+      verificado_em: "2026-08-10T09:00:00.000Z",
       estado_verificacao: "verificado",
-      validado_em: "2026-07-10T09:00:00.000Z",
-      atualizado_em: "2026-07-10T09:00:00.000Z",
-      // Extensão de demo (não faz parte do schema SQL original) para suportar
-      // o estado de verificação por campo pedido no ecrã de Nível 1.
-      // Documentado em backend/firestore-schema.md.
-      verificacoes_campo: {
-        alergias: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-07-10" },
-        esquema_atuacao_crise: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-07-10" },
-        farmacos_contraindicados: { estado: "nao_verificado", em: "2026-06-22" },
-        medicacao_cronica: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-07-10" },
-        vacinas: { estado: "verificado", por: "Enf.º Coordenador", em: "2026-03-03" }
-      }
+      validado_em: "2026-08-10T09:00:00.000Z",
+      atualizado_em: "2026-08-10T09:00:00.000Z"
+    });
+    db.documentos.push({
+      id: uuid(), paciente_id: matildeId, tipo: "rgpd", nome_ficheiro: "rgpd_matilde_sousa.pdf",
+      storage_path: "documentos/" + matildeId + "/rgpd.pdf", enviado_por_id: drAnaId, enviado_em: nowISO()
+    });
+    db.documentos.push({
+      id: uuid(), paciente_id: matildeId, tipo: "termo_responsabilidade", nome_ficheiro: "termo_responsabilidade_matilde_sousa.pdf",
+      storage_path: "documentos/" + matildeId + "/termo.pdf", enviado_por_id: drAnaId, enviado_em: nowISO()
     });
 
     var pulseiraMatildeId = "puls-matilde-001";
     db.pulseiras.push({
-      id: pulseiraMatildeId,
-      token: "SAVI-DEMO-MATILDE",
-      serial_fisico: "NTAG-000101",
-      lote_id: loteId,
-      estado: "ativa",
-      paciente_id: matildeId,
-      protegida_por_senha: false,
-      senha_referencia: null,
-      revogada_por: null,
-      atribuida_em: nowISO(),
-      desativada_em: null,
-      motivo_desativacao: null,
-      criado_em: nowISO()
+      id: pulseiraMatildeId, token: "SAVI-DEMO-MATILDE", serial_fisico: "NTAG-000101", lote_id: loteId,
+      estado: "ativa", paciente_id: matildeId, atribuida_em: nowISO(), desativada_em: null,
+      motivo_desativacao: null, criado_em: nowISO()
     });
 
     // ---- Paciente adulto: João Ribeiro (insuficiência renal crónica) ----
     var joaoId = "pac-joao-ribeiro";
+    var drTiago = db.profissionais[1];
     db.pacientes.push({
       id: joaoId,
       nome: "João Ribeiro",
       data_nascimento: "1958-11-02",
+      sexo: "M",
+      numero_utente: "1122334455",
+      morada: "Avenida da República, 210, 2º Esq., 4400-000 Vila Nova de Gaia",
+      contacto_familia: "+351 913 555 222 (esposa — Helena Ribeiro)",
       contacto_emergencia: "+351 913 555 222 (esposa — Helena Ribeiro)",
-      referencia_sistema_ext: "processo nº 77490/2025, Hospital de referência de Nefrologia",
+      gestor_do_caso: gestorDoCaso(drTiago),
       estado_consentimento: "ativo",
-      consentimento_prestado_por: "proprio",
-      consentimento_nome_tutor: null,
-      consentimento_documento_ref: "CC 111111111 ZZ1",
-      consentimento_data: "2026-02-18",
-      origem: "piloto",
-      profissional_solicitante_id: null,
+      criado_por_id: drTiagoId,
       criado_em: nowISO()
     });
     db.dados_nivel1.push({
@@ -221,48 +250,29 @@
       altura_cm: 172,
       biometria_registada_em: "2026-06-01",
       alergias: "Sem alergias conhecidas",
-      grupo_sanguineo: "A Rh-",
-      diagnosticos_ativos: "Doença renal crónica estadio 5 (N18.5); Hipertensão arterial (I10)",
-      terapeutica: "Hemodiálise 3x/semana (2ª, 4ª, 6ª); Losartan 50mg 1x/dia",
-      medicacao_cronica: "Losartan 50mg 1x/dia; Carbonato de cálcio 500mg às refeições",
-      farmacos_contraindicados: "Anti-inflamatórios não esteroides (AINEs); contraste iodado sem preparação",
+      condicao_critica: "Doença renal crónica estadio 5 (N18.5); Hipertensão arterial (I10)",
+      esquema_dose: "Hemodiálise 3x/semana (2ª, 4ª, 6ª); Losartan 50mg 1x/dia",
+      medicacao_contraindicada: "Anti-inflamatórios não esteroides (AINEs); contraste iodado sem preparação",
       limitacao_terapeutica: "nao_aplicavel",
-      ventilacao_invasiva: "nao",
-      vni: "nao",
-      tecnicas_dialiticas: "sim",
       esquema_atuacao_crise: "Em caso de hipercaliemia ou sobrecarga de volume, contactar Nefrologia de urgência antes de qualquer decisão de diálise extra.",
-      hospital_referencia: "Hospital de referência de Nefrologia",
-      hospital_referencia_contacto: "+351 22 000 0000",
-      vacinas: "Vacina da gripe 2025/2026 administrada; hepatite B em esquema reforçado (doente dialisado)",
-      escrito_por_id: adminSimplesId,
+      notas: "Doente dialisado — evitar sobrecarga de volume em fluidoterapia.",
+      medicacao_cronica: "Losartan 50mg 1x/dia; Carbonato de cálcio 500mg às refeições",
+      escrito_por_id: drTiagoId,
       escrito_em: nowISO(),
       verificado_por_id: null,
       verificado_em: null,
       estado_verificacao: "nao_verificado",
       validado_em: null,
-      atualizado_em: nowISO(),
-      verificacoes_campo: {
-        alergias: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-06-01" },
-        esquema_atuacao_crise: { estado: "nao_verificado", em: "2026-06-01" },
-        farmacos_contraindicados: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-06-01" },
-        medicacao_cronica: { estado: "nao_verificado", em: "2026-06-01" },
-        vacinas: { estado: "nao_verificado", em: "2026-06-01" }
-      }
+      atualizado_em: nowISO()
+    });
+    db.documentos.push({
+      id: uuid(), paciente_id: joaoId, tipo: "rgpd", nome_ficheiro: "rgpd_joao_ribeiro.pdf",
+      storage_path: "documentos/" + joaoId + "/rgpd.pdf", enviado_por_id: drTiagoId, enviado_em: nowISO()
     });
     db.pulseiras.push({
-      id: "puls-joao-001",
-      token: "SAVI-DEMO-JOAO",
-      serial_fisico: "NTAG-000102",
-      lote_id: loteId,
-      estado: "ativa",
-      paciente_id: joaoId,
-      protegida_por_senha: false,
-      senha_referencia: null,
-      revogada_por: null,
-      atribuida_em: nowISO(),
-      desativada_em: null,
-      motivo_desativacao: null,
-      criado_em: nowISO()
+      id: "puls-joao-001", token: "SAVI-DEMO-JOAO", serial_fisico: "NTAG-000102", lote_id: loteId,
+      estado: "ativa", paciente_id: joaoId, atribuida_em: nowISO(), desativada_em: null,
+      motivo_desativacao: null, criado_em: nowISO()
     });
 
     // ---- Paciente pediátrico: Rodrigo Alves (cardiopatia congénita) ----
@@ -271,15 +281,14 @@
       id: rodrigoId,
       nome: "Rodrigo Alves",
       data_nascimento: "2018-09-30",
+      sexo: "M",
+      numero_utente: "5566778899",
+      morada: "Rua do Carvalho, 45, 4200-000 Porto",
+      contacto_familia: "+351 966 111 222 (pai — Tiago Alves)",
       contacto_emergencia: "+351 966 111 222 (pai — Tiago Alves)",
-      referencia_sistema_ext: "processo nº 30021/2024, Hospital Pediátrico de referência",
+      gestor_do_caso: gestorDoCaso(drAna),
       estado_consentimento: "ativo",
-      consentimento_prestado_por: "tutor_legal",
-      consentimento_nome_tutor: "Tiago Alves",
-      consentimento_documento_ref: "CC 222222222 ZZ2",
-      consentimento_data: "2026-01-20",
-      origem: "piloto",
-      profissional_solicitante_id: null,
+      criado_por_id: drAnaId,
       criado_em: nowISO()
     });
     db.dados_nivel1.push({
@@ -288,65 +297,37 @@
       altura_cm: 118,
       biometria_registada_em: "2026-05-15",
       alergias: "Sem alergias conhecidas",
-      grupo_sanguineo: "B Rh+",
-      diagnosticos_ativos: "Tetralogia de Fallot operada (Q21.3)",
-      terapeutica: "Propranolol 10mg 2x/dia; vigilância cardiológica trimestral",
-      medicacao_cronica: "Propranolol 10mg 2x/dia",
-      farmacos_contraindicados: "Descongestionantes simpaticomiméticos",
+      condicao_critica: "Tetralogia de Fallot operada (Q21.3)",
+      esquema_dose: "Propranolol 10mg 2x/dia",
+      medicacao_contraindicada: "Descongestionantes simpaticomiméticos",
       limitacao_terapeutica: "nao",
-      ventilacao_invasiva: "nao",
-      vni: "nao",
-      tecnicas_dialiticas: "nao",
       esquema_atuacao_crise: "Em crise de cianose/hipóxia aguda, posição genupeitoral, oxigénio e contacto imediato com Cardiologia Pediátrica de referência.",
-      hospital_referencia: "Hospital Pediátrico de referência",
-      hospital_referencia_contacto: "+351 21 000 1111",
-      vacinas: "PNV em dia; vacina da gripe anual administrada",
+      notas: "Vigilância cardiológica trimestral.",
+      medicacao_cronica: "Propranolol 10mg 2x/dia",
       escrito_por_id: drAnaId,
       escrito_em: nowISO(),
       verificado_por_id: drAnaId,
       verificado_em: "2026-05-15T10:00:00.000Z",
       estado_verificacao: "verificado",
       validado_em: "2026-05-15T10:00:00.000Z",
-      atualizado_em: "2026-05-15T10:00:00.000Z",
-      verificacoes_campo: {
-        alergias: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-05-15" },
-        esquema_atuacao_crise: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-05-15" },
-        farmacos_contraindicados: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-05-15" },
-        medicacao_cronica: { estado: "verificado", por: "Dr.ª Ana Silva", em: "2026-05-15" },
-        vacinas: { estado: "nao_verificado", em: "2026-05-15" }
-      }
+      atualizado_em: "2026-05-15T10:00:00.000Z"
     });
     db.pulseiras.push({
-      id: "puls-rodrigo-perdida",
-      token: "SAVI-DEMO-RODRIGO-PERDIDA",
-      serial_fisico: "NTAG-000103",
-      lote_id: loteId,
-      estado: "perdida",
-      paciente_id: rodrigoId,
-      protegida_por_senha: false,
-      senha_referencia: null,
-      revogada_por: "familia",
-      atribuida_em: nowISO(),
-      desativada_em: nowISO(),
-      motivo_desativacao: "Pulseira perdida — reportada pela família.",
-      criado_em: nowISO()
+      id: "puls-rodrigo-perdida", token: "SAVI-DEMO-RODRIGO-PERDIDA", serial_fisico: "NTAG-000103", lote_id: loteId,
+      estado: "perdida", paciente_id: rodrigoId, atribuida_em: nowISO(), desativada_em: nowISO(),
+      motivo_desativacao: "Pulseira perdida — reportada pelo profissional.", criado_em: nowISO()
     });
 
-    // ---- Pulseira ainda não atribuída (para testar ecrã de erro) ----
+    // ---- Pulseira ainda não atribuída (para testar "Solicitar pulseira") ----
     db.pulseiras.push({
-      id: "puls-nao-atribuida-001",
-      token: "SAVI-DEMO-NAO-ATRIBUIDA",
-      serial_fisico: "NTAG-000104",
-      lote_id: loteId,
-      estado: "nao_atribuida",
-      paciente_id: null,
-      protegida_por_senha: false,
-      senha_referencia: null,
-      revogada_por: null,
-      atribuida_em: null,
-      desativada_em: null,
-      motivo_desativacao: null,
-      criado_em: nowISO()
+      id: "puls-nao-atribuida-001", token: "SAVI-DEMO-NAO-ATRIBUIDA", serial_fisico: "NTAG-000104", lote_id: loteId,
+      estado: "nao_atribuida", paciente_id: null, atribuida_em: null, desativada_em: null,
+      motivo_desativacao: null, criado_em: nowISO()
+    });
+    db.pulseiras.push({
+      id: "puls-nao-atribuida-002", token: "SAVI-DEMO-NAO-ATRIBUIDA-2", serial_fisico: "NTAG-000105", lote_id: loteId,
+      estado: "nao_atribuida", paciente_id: null, atribuida_em: null, desativada_em: null,
+      motivo_desativacao: null, criado_em: nowISO()
     });
 
     return db;
@@ -377,7 +358,7 @@
     try {
       localStorage.setItem(DB_KEY, JSON.stringify(db));
     } catch (e) {
-      // localStorage indisponível (ex. modo privado) — a demo continua em memória.
+      // localStorage indisponível (ex. modo privado) — a simulação continua em memória.
     }
   }
 
@@ -387,13 +368,42 @@
     persist(DB);
   }
 
-  function calcularIdade(dataNascISO) {
+  function calcularIdadeAnos(dataNascISO) {
     var hoje = new Date();
     var nasc = new Date(dataNascISO);
     var anos = hoje.getFullYear() - nasc.getFullYear();
     var m = hoje.getMonth() - nasc.getMonth();
     if (m < 0 || (m === 0 && hoje.getDate() < nasc.getDate())) anos--;
     return anos;
+  }
+
+  function calcularIdadeMesesTotais(dataNascISO) {
+    var hoje = new Date();
+    var nasc = new Date(dataNascISO);
+    var meses = (hoje.getFullYear() - nasc.getFullYear()) * 12 + (hoje.getMonth() - nasc.getMonth());
+    if (hoje.getDate() < nasc.getDate()) meses--;
+    return Math.max(0, meses);
+  }
+
+  // Idade formatada em anos e/ou meses, como pedido para o cabeçalho do
+  // Nível 1: crianças com menos de 3 anos mostram anos+meses (ou só
+  // meses, se tiver menos de 1 ano); a partir dos 3 anos mostra só anos.
+  function formatarIdade(dataNascISO) {
+    var mesesTotais = calcularIdadeMesesTotais(dataNascISO);
+    if (mesesTotais < 36) {
+      var anos = Math.floor(mesesTotais / 12);
+      var meses = mesesTotais % 12;
+      if (anos === 0) return meses + (meses === 1 ? " mês" : " meses");
+      return anos + (anos === 1 ? " ano" : " anos") + " " + meses + (meses === 1 ? " mês" : " meses");
+    }
+    var anosTotais = calcularIdadeAnos(dataNascISO);
+    return anosTotais + (anosTotais === 1 ? " ano" : " anos");
+  }
+
+  // Superfície corporal — fórmula de Mosteller: √((altura_cm × peso_kg) / 3600).
+  function calcularSuperficieCorporal(alturaCm, pesoKg) {
+    if (!alturaCm || !pesoKg) return null;
+    return Math.sqrt((alturaCm * pesoKg) / 3600);
   }
 
   var mockdb = {
@@ -406,133 +416,165 @@
     },
     uuid: uuid,
     nowISO: nowISO,
-    calcularIdade: calcularIdade,
+    calcularIdade: calcularIdadeAnos,
+    formatarIdade: formatarIdade,
+    calcularSuperficieCorporal: calcularSuperficieCorporal,
+
+    // ---------- Profissionais / utilizadores / superadmin ----------
+    listProfissionais: function () {
+      return DB.profissionais.slice();
+    },
+    getProfissionalPorCredencial: function (credencial) {
+      return DB.profissionais.find(function (p) { return p.credencial_ordem === credencial; }) || null;
+    },
+    getProfissional: function (id) {
+      return DB.profissionais.find(function (p) { return p.id === id; }) || null;
+    },
+    // `dados.pinHash` já vem calculado (hashUtil.sha256Hex) — nunca se
+    // recebe/guarda o PIN em texto simples nesta função.
+    criarProfissional: function (dados) {
+      var novo = {
+        id: uuid(),
+        nome: dados.nome,
+        credencial_ordem: dados.credencial_ordem,
+        pin_hash: dados.pinHash,
+        papeis: dados.papeis || [],
+        funcao_auditor: !!dados.funcao_auditor,
+        servico: dados.servico || "",
+        especialidade: dados.especialidade || "",
+        instituicao_servico: dados.instituicao_servico || "",
+        telefone_institucional: dados.telefone_institucional || "",
+        ativo: true,
+        criado_em: nowISO()
+      };
+      DB.profissionais.push(novo);
+      save();
+      return novo;
+    },
+    atualizarProfissional: function (id, dados) {
+      var p = this.getProfissional(id);
+      if (!p) throw new Error("Conta não encontrada.");
+      ["nome", "credencial_ordem", "servico", "especialidade", "instituicao_servico", "telefone_institucional"].forEach(function (k) {
+        if (typeof dados[k] === "string") p[k] = dados[k];
+      });
+      if (Array.isArray(dados.papeis)) p.papeis = dados.papeis;
+      if (typeof dados.funcao_auditor === "boolean") p.funcao_auditor = dados.funcao_auditor;
+      if (dados.pinHash) p.pin_hash = dados.pinHash;
+      save();
+      return p;
+    },
+    desativarProfissional: function (id) {
+      var p = this.getProfissional(id);
+      if (!p) throw new Error("Conta não encontrada.");
+      p.ativo = false;
+      save();
+      return p;
+    },
+    ativarProfissional: function (id) {
+      var p = this.getProfissional(id);
+      if (!p) throw new Error("Conta não encontrada.");
+      p.ativo = true;
+      save();
+      return p;
+    },
+    eliminarProfissional: function (id) {
+      var idx = DB.profissionais.findIndex(function (p) { return p.id === id; });
+      if (idx === -1) throw new Error("Conta não encontrada.");
+      DB.profissionais.splice(idx, 1);
+      save();
+      return true;
+    },
 
     // ---------- Pacientes ----------
     listPacientes: function () {
       return DB.pacientes.slice();
     },
+    listPacientesDoProfissional: function (profissionalId) {
+      return DB.pacientes.filter(function (p) { return p.criado_por_id === profissionalId; });
+    },
     getPaciente: function (id) {
       return DB.pacientes.find(function (p) { return p.id === id; }) || null;
     },
-    criarPacientePorFamilia: function (contaFamiliaId, dados) {
-      // Só campos administrativos — nunca dados clínicos.
+    getPacientePorNumeroUtente: function (numeroUtente) {
+      return DB.pacientes.find(function (p) { return p.numero_utente === numeroUtente; }) || null;
+    },
+    // Método de acesso por identidade: nome completo + data de nascimento + sexo.
+    getPacientePorIdentidade: function (nomeCompleto, dataNascimento, sexo) {
+      var nomeNorm = (nomeCompleto || "").trim().toLowerCase();
+      return DB.pacientes.find(function (p) {
+        return (p.nome || "").trim().toLowerCase() === nomeNorm &&
+          p.data_nascimento === dataNascimento &&
+          p.sexo === sexo;
+      }) || null;
+    },
+    // Verifica se `profissionalId` pode gerir (ver/editar) este paciente:
+    // só o criador, ou o superadmin (verificação de superadmin feita pelo
+    // chamador, que passa `ehSuperadmin=true` quando aplicável).
+    podeGerirPaciente: function (pacienteId, profissionalId, ehSuperadmin) {
+      if (ehSuperadmin) return true;
+      var p = this.getPaciente(pacienteId);
+      return !!p && p.criado_por_id === profissionalId;
+    },
+    criarPaciente: function (dados, profissionalId) {
+      var criador = this.getProfissional(profissionalId);
       var novo = {
         id: uuid(),
         nome: dados.nome,
         data_nascimento: dados.data_nascimento,
+        sexo: dados.sexo,
+        numero_utente: dados.numero_utente || "",
+        morada: dados.morada || "",
+        contacto_familia: dados.contacto_familia || "",
         contacto_emergencia: dados.contacto_emergencia || "",
-        referencia_sistema_ext: "",
+        gestor_do_caso: dados.gestor_do_caso || (criador ? {
+          nome: criador.nome,
+          credencial_ordem: criador.credencial_ordem,
+          especialidade: criador.especialidade,
+          instituicao_servico: criador.instituicao_servico,
+          telefone_institucional: criador.telefone_institucional
+        } : {}),
         estado_consentimento: "pendente",
-        consentimento_prestado_por: dados.consentimento_prestado_por || null,
-        consentimento_nome_tutor: dados.consentimento_nome_tutor || null,
-        consentimento_documento_ref: dados.consentimento_documento_ref || null,
-        consentimento_data: null,
-        origem: "familia",
-        profissional_solicitante_id: null,
+        criado_por_id: profissionalId,
         criado_em: nowISO()
       };
       DB.pacientes.push(novo);
-      DB.familia_paciente.push({ conta_familia_id: contaFamiliaId, paciente_id: novo.id, criado_em: nowISO() });
-      // Cria registo clínico vazio — só a equipa administradora o preenche.
+      // Regista o registo clínico vazio — só o profissional dono (ou o
+      // superadmin) o preenche depois.
       DB.dados_nivel1.push({
         paciente_id: novo.id,
         peso_kg: null, altura_cm: null, biometria_registada_em: null,
-        alergias: "", grupo_sanguineo: "",
-        diagnosticos_ativos: "", terapeutica: "", medicacao_cronica: "", farmacos_contraindicados: "",
-        limitacao_terapeutica: "nao_aplicavel", ventilacao_invasiva: "nao", vni: "nao", tecnicas_dialiticas: "nao",
-        esquema_atuacao_crise: "", hospital_referencia: "", hospital_referencia_contacto: "", vacinas: "",
+        alergias: "", condicao_critica: "", esquema_dose: "", medicacao_contraindicada: "",
+        limitacao_terapeutica: "nao_aplicavel", esquema_atuacao_crise: "", notas: "", medicacao_cronica: "",
         escrito_por_id: null, escrito_em: null,
         verificado_por_id: null, verificado_em: null,
-        estado_verificacao: "nao_verificado", validado_em: null, atualizado_em: nowISO(),
-        verificacoes_campo: {}
+        estado_verificacao: "nao_verificado", validado_em: null, atualizado_em: nowISO()
       });
       save();
       return novo;
     },
-    // Registo de paciente pela equipa administradora (origem 'piloto').
-    criarPacienteAdmin: function (dados) {
-      var novo = {
-        id: uuid(),
-        nome: dados.nome,
-        data_nascimento: dados.data_nascimento,
-        contacto_emergencia: dados.contacto_emergencia || "",
-        referencia_sistema_ext: dados.referencia_sistema_ext || "",
-        estado_consentimento: "pendente",
-        consentimento_prestado_por: null,
-        consentimento_nome_tutor: null,
-        consentimento_documento_ref: null,
-        consentimento_data: null,
-        origem: "piloto",
-        profissional_solicitante_id: null,
-        criado_em: nowISO()
-      };
-      DB.pacientes.push(novo);
-      DB.dados_nivel1.push({
-        paciente_id: novo.id, peso_kg: null, altura_cm: null, biometria_registada_em: null,
-        alergias: "", grupo_sanguineo: "", diagnosticos_ativos: "", terapeutica: "",
-        medicacao_cronica: "", farmacos_contraindicados: "",
-        limitacao_terapeutica: "nao_aplicavel", ventilacao_invasiva: "nao", vni: "nao", tecnicas_dialiticas: "nao",
-        esquema_atuacao_crise: "", hospital_referencia: "", hospital_referencia_contacto: "", vacinas: "",
-        escrito_por_id: null, escrito_em: null, verificado_por_id: null, verificado_em: null,
-        estado_verificacao: "nao_verificado", validado_em: null, atualizado_em: nowISO(), verificacoes_campo: {}
+    atualizarPaciente: function (pacienteId, dados) {
+      // Campos administrativos de "Dados do utente" — nunca dados clínicos
+      // (esses vivem sempre em dados_nivel1).
+      var p = this.getPaciente(pacienteId);
+      if (!p) throw new Error("Paciente não encontrado.");
+      ["nome", "morada", "numero_utente", "contacto_familia", "contacto_emergencia", "sexo", "data_nascimento", "estado_consentimento"].forEach(function (k) {
+        if (typeof dados[k] !== "undefined") p[k] = dados[k];
       });
-      save();
-      return novo;
-    },
-    atualizarContactoPaciente: function (pacienteId, dados) {
-      // Permitido à família: contacto de emergência. Nunca dados clínicos.
-      var p = this.getPaciente(pacienteId);
-      if (!p) throw new Error("Paciente não encontrado.");
-      if (typeof dados.contacto_emergencia === "string") p.contacto_emergencia = dados.contacto_emergencia;
+      if (dados.gestor_do_caso) p.gestor_do_caso = dados.gestor_do_caso;
       save();
       return p;
-    },
-    prestarConsentimento: function (pacienteId, dados) {
-      var p = this.getPaciente(pacienteId);
-      if (!p) throw new Error("Paciente não encontrado.");
-      p.estado_consentimento = "ativo";
-      p.consentimento_prestado_por = dados.consentimento_prestado_por;
-      p.consentimento_nome_tutor = dados.consentimento_nome_tutor || null;
-      p.consentimento_documento_ref = dados.consentimento_documento_ref;
-      p.consentimento_data = dados.consentimento_data || nowISO().slice(0, 10);
-      save();
-      return p;
-    },
-    revogarConsentimento: function (pacienteId) {
-      var p = this.getPaciente(pacienteId);
-      if (!p) throw new Error("Paciente não encontrado.");
-      p.estado_consentimento = "revogado";
-      save();
-      return p;
-    },
-    pedirEliminacao: function (pacienteId, contaFamiliaId, motivo) {
-      // Regista o pedido de eliminação (art. 17º RGPD). Nesta demo não apaga
-      // dados automaticamente — fica registado para tratamento manual pela
-      // equipa administradora/DPO, tal como aconteceria num processo real.
-      DB.acessos.push({
-        id: uuid(),
-        pulseira_id: null,
-        profissional_id: null,
-        nivel_acedido: "negado",
-        motivo: "[PEDIDO DE ELIMINAÇÃO RGPD Art.17] paciente=" + pacienteId + "; conta_familia=" + contaFamiliaId + "; motivo=" + (motivo || ""),
-        servico: "Pedido família",
-        ip_ou_localizacao: "demo",
-        notificado_titular_em: null,
-        acedido_em: nowISO()
-      });
-      save();
-      return true;
     },
 
     // ---------- dados_nivel1 ----------
     getDadosNivel1: function (pacienteId) {
       return DB.dados_nivel1.find(function (d) { return d.paciente_id === pacienteId; }) || null;
     },
-    // Escrita EXCLUSIVA de profissional/admin. `autor` = { id, papel }.
+    // Escrita EXCLUSIVA do profissional criador (ou superadmin). `autor` = { id, ehSuperadmin }.
     escreverDadosNivel1: function (pacienteId, campos, autor) {
-      if (!autor || (autor.papel !== "profissional" && autor.papel !== "admin")) {
-        throw new Error("Acesso negado: apenas profissionais/equipa administradora podem escrever dados clínicos.");
+      var paciente = this.getPaciente(pacienteId);
+      if (!paciente) throw new Error("Paciente não encontrado.");
+      if (!autor || (!autor.ehSuperadmin && paciente.criado_por_id !== autor.id)) {
+        throw new Error("Acesso negado: só o profissional que criou este paciente (ou o superadmin) pode escrever dados clínicos.");
       }
       var registo = this.getDadosNivel1(pacienteId);
       if (!registo) throw new Error("Registo clínico não encontrado para este paciente.");
@@ -550,8 +592,10 @@
       return registo;
     },
     verificarDadosNivel1: function (pacienteId, autor) {
-      if (!autor || (autor.papel !== "profissional" && autor.papel !== "admin")) {
-        throw new Error("Acesso negado: apenas profissionais/equipa administradora podem verificar dados clínicos.");
+      var paciente = this.getPaciente(pacienteId);
+      if (!paciente) throw new Error("Paciente não encontrado.");
+      if (!autor || (!autor.ehSuperadmin && paciente.criado_por_id !== autor.id)) {
+        throw new Error("Acesso negado: só o profissional que criou este paciente (ou o superadmin) pode verificar dados clínicos.");
       }
       var registo = this.getDadosNivel1(pacienteId);
       if (!registo) throw new Error("Registo clínico não encontrado.");
@@ -561,6 +605,25 @@
       registo.validado_em = nowISO();
       save();
       return registo;
+    },
+
+    // ---------- Documentos (RGPD + termo de responsabilidade) ----------
+    listDocumentosDoPaciente: function (pacienteId) {
+      return DB.documentos.filter(function (d) { return d.paciente_id === pacienteId; });
+    },
+    adicionarDocumento: function (pacienteId, dados, autorId) {
+      var novo = {
+        id: uuid(),
+        paciente_id: pacienteId,
+        tipo: dados.tipo || "outro",
+        nome_ficheiro: dados.nome_ficheiro || "documento.pdf",
+        storage_path: "documentos/" + pacienteId + "/" + uuid() + ".pdf",
+        enviado_por_id: autorId || null,
+        enviado_em: nowISO()
+      };
+      DB.documentos.push(novo);
+      save();
+      return novo;
     },
 
     // ---------- Pulseiras ----------
@@ -596,9 +659,6 @@
           lote_id: lote.id,
           estado: "nao_atribuida",
           paciente_id: null,
-          protegida_por_senha: false,
-          senha_referencia: null,
-          revogada_por: null,
           atribuida_em: null,
           desativada_em: null,
           motivo_desativacao: null,
@@ -620,85 +680,32 @@
       save();
       return p;
     },
+    // "Solicitar pulseira" — liga o paciente ao próximo token não
+    // atribuído disponível (reaproveita atribuirPulseira, tal como já
+    // existia na iteração anterior).
+    solicitarPulseiraParaPaciente: function (pacienteId) {
+      var livre = DB.pulseiras.find(function (p) { return p.estado === "nao_atribuida"; });
+      if (!livre) throw new Error("Não há pulseiras disponíveis por atribuir. Gere um novo lote.");
+      return this.atribuirPulseira(livre.id, pacienteId);
+    },
     desativarPulseira: function (pulseiraId, motivo, revogadaPor) {
       var p = this.getPulseira(pulseiraId);
       if (!p) throw new Error("Pulseira não encontrada.");
       p.estado = "desativada";
       p.desativada_em = nowISO();
       p.motivo_desativacao = motivo || "";
-      p.revogada_por = revogadaPor || "equipa";
       save();
       return p;
-    },
-
-    // ---------- Profissionais ----------
-    listProfissionais: function () {
-      return DB.profissionais.slice();
-    },
-    getProfissionalPorCredencial: function (credencial) {
-      return DB.profissionais.find(function (p) { return p.credencial_ordem === credencial; }) || null;
-    },
-    getProfissional: function (id) {
-      return DB.profissionais.find(function (p) { return p.id === id; }) || null;
-    },
-    criarProfissional: function (dados) {
-      var novo = {
-        id: uuid(),
-        nome: dados.nome,
-        credencial_ordem: dados.credencial_ordem,
-        servico: dados.servico || "",
-        tipo_relacao: "interno",
-        instituicao_id: null,
-        mfa_ativo: true,
-        funcao_auditor: !!dados.funcao_auditor,
-        ativo: true,
-        criado_em: nowISO(),
-        _password_demo: dados.password || "demo123",
-        _papel: dados.papel === "admin" ? "admin" : undefined
-      };
-      DB.profissionais.push(novo);
-      save();
-      return novo;
-    },
-    desativarProfissional: function (id) {
-      var p = this.getProfissional(id);
-      if (!p) throw new Error("Profissional não encontrado.");
-      p.ativo = false;
-      save();
-      return p;
-    },
-    ativarProfissional: function (id) {
-      var p = this.getProfissional(id);
-      if (!p) throw new Error("Profissional não encontrado.");
-      p.ativo = true;
-      save();
-      return p;
-    },
-
-    // ---------- Contas de família ----------
-    getContaFamiliaPorEmail: function (email) {
-      return DB.contas_familia.find(function (c) { return c.email.toLowerCase() === (email || "").toLowerCase(); }) || null;
-    },
-    getContaFamilia: function (id) {
-      return DB.contas_familia.find(function (c) { return c.id === id; }) || null;
-    },
-    listPacientesDaFamilia: function (contaFamiliaId) {
-      var ids = DB.familia_paciente.filter(function (fp) { return fp.conta_familia_id === contaFamiliaId; }).map(function (fp) { return fp.paciente_id; });
-      return DB.pacientes.filter(function (p) { return ids.indexOf(p.id) !== -1; });
-    },
-    familiaTemAcessoPaciente: function (contaFamiliaId, pacienteId) {
-      return DB.familia_paciente.some(function (fp) { return fp.conta_familia_id === contaFamiliaId && fp.paciente_id === pacienteId; });
-    },
-    listPulseirasDoPaciente: function (pacienteId) {
-      return DB.pulseiras.filter(function (p) { return p.paciente_id === pacienteId; });
     },
 
     // ---------- Acessos (audit log) — escrita reservada ao worker-sim ----------
     registarAcesso: function (registo) {
       var novo = {
         id: uuid(),
+        metodo_acesso: registo.metodo_acesso,
         pulseira_id: registo.pulseira_id || null,
-        profissional_id: registo.profissional_id || null,
+        paciente_id: registo.paciente_id || null,
+        utilizador_id: registo.utilizador_id || null,
         nivel_acedido: registo.nivel_acedido,
         motivo: registo.motivo || null,
         servico: registo.servico || null,
@@ -715,13 +722,12 @@
       if (a) { a.notificado_titular_em = nowISO(); save(); }
       return a;
     },
-    // Leitura só para funcao_auditor==true ou admin (aplicado nas views/rules).
+    // Leitura só para funcao_auditor==true ou superadmin (aplicado nas views/rules).
     listAcessos: function () {
       return DB.acessos.slice().sort(function (a, b) { return new Date(b.acedido_em) - new Date(a.acedido_em); });
     },
     listAcessosDoPaciente: function (pacienteId) {
-      var pulseiraIds = DB.pulseiras.filter(function (p) { return p.paciente_id === pacienteId; }).map(function (p) { return p.id; });
-      return DB.acessos.filter(function (a) { return pulseiraIds.indexOf(a.pulseira_id) !== -1; })
+      return DB.acessos.filter(function (a) { return a.paciente_id === pacienteId; })
         .sort(function (a, b) { return new Date(b.acedido_em) - new Date(a.acedido_em); });
     }
   };

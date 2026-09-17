@@ -1,14 +1,18 @@
 /* views/erro.js — ecrãs de erro claros (pulseira revogada/perdida, token
- * inválido, sessão expirada, acesso negado por papel). Nunca mostra dados. */
+ * inválido, paciente não encontrado, motivo obrigatório em falta, sessão
+ * expirada, acesso negado por papel). Nunca mostra dados clínicos. */
 function viewErro(root, tipo) {
   "use strict";
 
   var mapa = {
     token_invalido: { titulo: "Token inválido", texto: "Esta pulseira não está registada no sistema SAVI. Verifique se está a ler a pulseira correta.", icon: "❌" },
-    pulseira_revogada: { titulo: "Pulseira revogada ou perdida", texto: (window.SAVI_ultimoErroScan && window.SAVI_ultimoErroScan.mensagem) || "Esta pulseira não está ativa.", icon: "🚫" },
+    pulseira_revogada: { titulo: "Pulseira revogada ou perdida", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Esta pulseira não está ativa.", icon: "🚫" },
+    nao_encontrado: { titulo: "Paciente não encontrado", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Não foi encontrado nenhum paciente com os dados indicados.", icon: "🔍" },
+    dados_invalidos: { titulo: "Dados incompletos", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Preencha todos os campos obrigatórios.", icon: "⚠️" },
+    motivo_obrigatorio: { titulo: "Motivo obrigatório", texto: "É obrigatório indicar um motivo para este método de acesso.", icon: "📝" },
     sessao_expirada: { titulo: "Sessão expirada", texto: "A sua sessão terminou após 5 minutos de inatividade, por motivos de segurança. Autentique-se novamente para continuar.", icon: "⏱️" },
     acesso_negado: { titulo: "Acesso não autorizado", texto: "Não tem permissões para aceder a esta área da aplicação.", icon: "🔒" },
-    erro: { titulo: "Ocorreu um erro", texto: (window.SAVI_ultimoErroScan && window.SAVI_ultimoErroScan.mensagem) || "Não foi possível concluir a operação.", icon: "⚠️" }
+    erro: { titulo: "Ocorreu um erro", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Não foi possível concluir a operação.", icon: "⚠️" }
   };
 
   var info = mapa[tipo] || mapa.erro;
@@ -30,23 +34,32 @@ function viewErro(root, tipo) {
     btnLogin.className = "btn btn-primary btn-block";
     btnLogin.textContent = "Iniciar sessão novamente";
     btnLogin.addEventListener("click", function () {
-      SAVI_router.navegar("#/login-profissional");
+      SAVI_router.navegar("#/identificacao");
     });
     acoes.appendChild(btnLogin);
-  } else if (sessaoAtiva) {
-    var btnScan = document.createElement("button");
-    btnScan.className = "btn btn-primary btn-block";
-    btnScan.textContent = "Voltar ao scan";
-    btnScan.addEventListener("click", function () {
-      SAVI_router.navegar("#/scan");
+  } else if (sessaoAtiva && authSim.getSessao().papelAtivo === "utilizador") {
+    var btnMetodo = document.createElement("button");
+    btnMetodo.className = "btn btn-primary btn-block";
+    btnMetodo.textContent = "Voltar aos métodos de acesso";
+    btnMetodo.addEventListener("click", function () {
+      SAVI_router.navegar("#/utilizador/metodo");
     });
-    acoes.appendChild(btnScan);
+    acoes.appendChild(btnMetodo);
+  } else if (sessaoAtiva) {
+    var btnInicio = document.createElement("button");
+    btnInicio.className = "btn btn-primary btn-block";
+    btnInicio.textContent = "Voltar ao início";
+    btnInicio.addEventListener("click", function () {
+      var papel = authSim.getSessao().papelAtivo;
+      SAVI_router.navegar(papel === "superadmin" ? "#/admin/dashboard" : "#/profissional/pacientes");
+    });
+    acoes.appendChild(btnInicio);
   } else {
     var btnHome = document.createElement("button");
     btnHome.className = "btn btn-primary btn-block";
     btnHome.textContent = "Voltar ao início";
     btnHome.addEventListener("click", function () {
-      SAVI_router.navegar("#/login-profissional");
+      SAVI_router.navegar("#/identificacao");
     });
     acoes.appendChild(btnHome);
   }

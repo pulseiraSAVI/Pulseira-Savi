@@ -1,14 +1,23 @@
 /* worker-sim.js
  * Simula o Cloudflare Worker (backend/cloudflare-worker/src/index.js) no
- * browser, só para esta demo. É o ÚNICO módulo que fala com o "mockdb"
- * (base de dados simulada) durante o fluxo de scan/break-glass — o
- * frontend (views/scan.js, views/resultado-nivel1.js) nunca acede
- * diretamente ao mockdb.pulseiras / mockdb.dados_nivel1 / mockdb.acessos,
- * exatamente como no sistema real o frontend nunca fala diretamente com
- * o Firestore para este fluxo (passa sempre pelo Worker).
+ * browser, só para esta simulação. É o ÚNICO módulo que fala com o
+ * "mockdb" durante o fluxo de break-glass — o frontend (views/utilizador-*.js,
+ * views/resultado-nivel1.js) nunca acede diretamente ao mockdb.pulseiras /
+ * mockdb.dados_nivel1 / mockdb.acessos, exatamente como no sistema real o
+ * frontend nunca fala diretamente com o Firestore para este fluxo (passa
+ * sempre pelo Worker).
  *
- * Implementa os passos 1-8 do fluxo de scan descritos no CLAUDE.md /
- * enunciado do projeto.
+ * Implementa os 3 métodos de acesso do papel 'utilizador' descritos no
+ * CLAUDE.md ("Fluxo de acesso"): pulseira (NFC/QR), número de utente, e
+ * identidade (nome completo + data de nascimento + sexo, com motivo
+ * obrigatório). Nível 2 NÃO EXISTE — foi eliminado por completo desta
+ * revisão, não há função equivalente aqui.
+ *
+ * Simplificação desta simulação: o PIN de 5 caracteres é validado uma
+ * única vez, na identificação (auth-sim.js) — o Worker real revalida-o a
+ * cada pedido porque corre sem estado entre pedidos (ver TODO em
+ * backend/cloudflare-worker/src/index.js); aqui isso equivale a verificar
+ * que a sessão continua ativa (mesmo timeout de 5 min de inatividade).
  */
 (function (global) {
   "use strict";
@@ -19,53 +28,81 @@
     return e;
   }
 
-  function simularNotificacaoResend(paciente, nivel) {
+  function simularNotificacaoResend(paciente, metodoAcesso) {
     // Stub assíncrono. NUNCA inclui dados clínicos no "corpo do email".
     setTimeout(function () {
-      var texto = "📧 Notificação enviada à família (simulado) — acesso de " + nivel + " ao registo de " + paciente.nome + " em " + new Date().toLocaleString("pt-PT") + ".";
+      var texto = "📧 Notificação enviada ao gestor do caso/família (simulado) — acesso por " + metodoAcesso + " ao registo de " + paciente.nome + " em " + new Date().toLocaleString("pt-PT") + ".";
       if (global.SAVI_toast) global.SAVI_toast(texto);
     }, 400);
   }
 
+  function garantirSessaoUtilizador() {
+    if (!global.authSim || !global.authSim.sessaoAtiva()) {
+      throw erro("sessao_expirada", "A sua sessão expirou por inatividade. Autentique-se novamente.");
+    }
+    var sessao = global.authSim.getSessao();
+    if (sessao.papelAtivo !== "utilizador") {
+      throw erro("acesso_negado", "Esta sessão não está no papel de utilizador (break-glass).");
+    }
+    return sessao;
+  }
+
+  function montarResultado(paciente, utilizadorId, servico, metodoAcesso, motivo) {
+    var dados = mockdb.getDadosNivel1(paciente.id);
+    var documentos = mockdb.listDocumentosDoPaciente(paciente.id);
+
+    var acesso = mockdb.registarAcesso({
+      metodo_acesso: metodoAcesso,
+      pulseira_id: null,
+      paciente_id: paciente.id,
+      utilizador_id: utilizadorId,
+      nivel_acedido: "nivel_1",
+      motivo: motivo || null,
+      servico: servico
+    });
+
+    simularNotificacaoResend(paciente, metodoAcesso);
+    setTimeout(function () { mockdb.marcarNotificado(acesso.id); }, 450);
+
+    return {
+      paciente: paciente,
+      dados: dados,
+      documentos: documentos,
+      idadeFormatada: mockdb.formatarIdade(paciente.data_nascimento),
+      metodoAcesso: metodoAcesso,
+      acessoId: acesso.id
+    };
+  }
+
+  function registarNegacao(metodoAcesso, pulseiraId, utilizadorId, servico, motivo) {
+    mockdb.registarAcesso({
+      metodo_acesso: metodoAcesso,
+      pulseira_id: pulseiraId || null,
+      paciente_id: null,
+      utilizador_id: utilizadorId,
+      nivel_acedido: "negado",
+      motivo: motivo || null,
+      servico: servico
+    });
+  }
+
   var workerSim = {
     /**
-     * POST /scan (simulado)
-     * @param {Object} params { token, profissionalId, servico }
-     * @returns {Object} { paciente, dados, pulseira }
-     * @throws erro com .tipo em: 'sessao_expirada' | 'token_invalido' | 'pulseira_revogada' | 'erro'
+     * Método 1 — leitura de pulseira (NFC ou QR).
+     * @param {Object} params { token, servico }
      */
-    scan: function (params) {
+    acessoPorPulseira: function (params) {
+      var sessao = garantirSessaoUtilizador();
       var token = params.token;
-      var profissionalId = params.profissionalId;
       var servico = params.servico;
 
-      // Passo 3: confirmar sessão ativa (timeout de 5 min de inatividade).
-      if (!global.authSim || !global.authSim.sessaoAtiva()) {
-        throw erro("sessao_expirada", "A sua sessão expirou por inatividade. Autentique-se novamente.");
-      }
-
-      // Passo 4: consultar pulseiras pelo token.
       var pulseira = mockdb.getPulseiraPorToken(token);
-
       if (!pulseira) {
-        mockdb.registarAcesso({
-          pulseira_id: null,
-          profissional_id: profissionalId,
-          nivel_acedido: "negado",
-          motivo: "Token inválido: " + token,
-          servico: servico
-        });
-        throw erro("token_invalido", "Token inválido. Esta pulseira não está registada no sistema.");
+        registarNegacao("pulseira", null, sessao.userId, servico, null);
+        throw erro("token_invalido", "Esta pulseira não está registada no sistema.");
       }
-
       if (pulseira.estado !== "ativa") {
-        mockdb.registarAcesso({
-          pulseira_id: pulseira.id,
-          profissional_id: profissionalId,
-          nivel_acedido: "negado",
-          motivo: "Pulseira em estado '" + pulseira.estado + "'",
-          servico: servico
-        });
+        registarNegacao("pulseira", pulseira.id, sessao.userId, servico, null);
         var msgs = {
           nao_atribuida: "Esta pulseira ainda não foi atribuída a nenhum paciente.",
           desativada: "Esta pulseira foi desativada.",
@@ -74,91 +111,60 @@
         };
         throw erro("pulseira_revogada", msgs[pulseira.estado] || "Pulseira não está ativa.");
       }
-
       var paciente = mockdb.getPaciente(pulseira.paciente_id);
       if (!paciente) {
-        mockdb.registarAcesso({
-          pulseira_id: pulseira.id,
-          profissional_id: profissionalId,
-          nivel_acedido: "negado",
-          motivo: "Pulseira ativa sem paciente associado (inconsistência de dados).",
-          servico: servico
-        });
+        registarNegacao("pulseira", pulseira.id, sessao.userId, servico, null);
         throw erro("erro", "Não foi possível associar esta pulseira a um paciente.");
       }
-
-      // Passo 5: devolver dados_nivel1, nunca bloqueando por falta de verificação.
-      var dados = mockdb.getDadosNivel1(paciente.id);
-
-      // Passo 6: escrever sempre um registo em acessos.
-      var acesso = mockdb.registarAcesso({
-        pulseira_id: pulseira.id,
-        profissional_id: profissionalId,
-        nivel_acedido: "nivel_1",
-        motivo: null,
-        servico: servico
-      });
-
-      // Passo 7: notificação assíncrona (não bloqueia a UI).
-      simularNotificacaoResend(paciente, "Nível 1");
-      setTimeout(function () { mockdb.marcarNotificado(acesso.id); }, 450);
-
-      return {
-        paciente: paciente,
-        dados: dados,
-        pulseira: pulseira,
-        idade: mockdb.calcularIdade(paciente.data_nascimento)
-      };
+      return montarResultado(paciente, sessao.userId, servico, "pulseira", null);
     },
 
     /**
-     * POST /scan/nivel2 (simulado)
-     * Exige motivo obrigatório. Nunca devolve o histórico completo —
-     * apenas a referência textual ao sistema do hospital.
+     * Método 2 — número de utente.
+     * @param {Object} params { numeroUtente, servico }
      */
-    pedirNivel2: function (params) {
-      var pulseiraId = params.pulseiraId;
-      var profissionalId = params.profissionalId;
+    acessoPorNumeroUtente: function (params) {
+      var sessao = garantirSessaoUtilizador();
+      var numeroUtente = (params.numeroUtente || "").trim();
       var servico = params.servico;
-      var motivo = (params.motivo || "").trim();
 
-      if (!global.authSim || !global.authSim.sessaoAtiva()) {
-        throw erro("sessao_expirada", "A sua sessão expirou por inatividade. Autentique-se novamente.");
+      if (!numeroUtente) throw erro("dados_invalidos", "Introduza o número de utente.");
+
+      var paciente = mockdb.getPacientePorNumeroUtente(numeroUtente);
+      if (!paciente) {
+        registarNegacao("numero_utente", null, sessao.userId, servico, null);
+        throw erro("nao_encontrado", "Não foi encontrado nenhum paciente com este número de utente.");
       }
+      return montarResultado(paciente, sessao.userId, servico, "numero_utente", null);
+    },
+
+    /**
+     * Método 3 — identidade (nome completo + data de nascimento + sexo).
+     * Exige motivo obrigatório ANTES de mostrar qualquer dado — regra não
+     * negociável (CLAUDE.md).
+     * @param {Object} params { nomeCompleto, dataNascimento, sexo, motivo, servico }
+     */
+    acessoPorIdentidade: function (params) {
+      var sessao = garantirSessaoUtilizador();
+      var nomeCompleto = (params.nomeCompleto || "").trim();
+      var dataNascimento = params.dataNascimento;
+      var sexo = params.sexo;
+      var motivo = (params.motivo || "").trim();
+      var servico = params.servico;
 
       if (!motivo) {
-        // Alinhado com o trigger da BD real: nivel_2 exige motivo obrigatório.
-        throw erro("motivo_obrigatorio", "É obrigatório indicar um motivo clínico para aceder ao Nível 2.");
+        throw erro("motivo_obrigatorio", "É obrigatório indicar um motivo para o acesso por identidade.");
+      }
+      if (!nomeCompleto || !dataNascimento || !sexo) {
+        throw erro("dados_invalidos", "Preencha nome completo, data de nascimento e sexo.");
       }
 
-      var pulseira = mockdb.getPulseira(pulseiraId);
-      if (!pulseira || pulseira.estado !== "ativa") {
-        mockdb.registarAcesso({
-          pulseira_id: pulseiraId,
-          profissional_id: profissionalId,
-          nivel_acedido: "negado",
-          motivo: motivo,
-          servico: servico
-        });
-        throw erro("pulseira_revogada", "Pulseira não está ativa.");
+      var paciente = mockdb.getPacientePorIdentidade(nomeCompleto, dataNascimento, sexo);
+      if (!paciente) {
+        registarNegacao("identidade", null, sessao.userId, servico, motivo);
+        throw erro("nao_encontrado", "Não foi encontrado nenhum paciente com esta identidade.");
       }
-
-      var paciente = mockdb.getPaciente(pulseira.paciente_id);
-
-      mockdb.registarAcesso({
-        pulseira_id: pulseira.id,
-        profissional_id: profissionalId,
-        nivel_acedido: "nivel_2",
-        motivo: motivo,
-        servico: servico
-      });
-
-      simularNotificacaoResend(paciente, "Nível 2 (histórico — motivo: " + motivo + ")");
-
-      // Nunca o histórico completo — só a referência textual.
-      return {
-        referencia_sistema_ext: paciente.referencia_sistema_ext || "Sem referência registada no sistema do hospital."
-      };
+      return montarResultado(paciente, sessao.userId, servico, "identidade", motivo);
     }
   };
 

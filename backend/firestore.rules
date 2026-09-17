@@ -1,23 +1,29 @@
 /**
  * firestore.rules — SAVI (Sistema de Acesso Virtual a Informação Clínica)
- * Fase 1 (piloto), 1 serviço de urgência.
+ * Pivô de produção, revisão de 15/09/2026. Substitui por completo o
+ * modelo anterior (família/profissional clínico/equipa administradora/
+ * auditor) — ver CLAUDE.md, secção "Pivô para produção".
  *
  * Princípio geral: negar tudo por defeito. Cada coleção é aberta apenas
  * com a regra mínima necessária para o papel em causa.
  *
  * Custom claims esperadas no ID token do Firebase Auth (definidas no
- * momento da criação da conta, nunca editáveis pelo próprio utilizador):
- *   - papel: 'profissional' | 'admin' | 'familia'
- *   - funcao_auditor: boolean (só relevante quando papel == 'admin')
- *   - profissional_id: string  (id do documento em /profissionais, quando papel in ['profissional','admin'])
- *   - conta_familia_id: string (id do documento em /contas_familia, quando papel == 'familia')
+ * momento da criação da conta pelo superadmin, nunca editáveis pelo
+ * próprio utilizador):
+ *   - papeis: array<string>  — subconjunto de 'profissional' | 'utilizador' | 'superadmin'
+ *   - funcao_auditor: boolean (só tem efeito quando papeis contém 'superadmin')
+ *   - profissional_id: string  (id do próprio documento em /profissionais)
  *
- * IMPORTANTE — o fluxo de scan (break-glass) NUNCA passa por aqui: o
- * frontend fala sempre com o Cloudflare Worker (backend/cloudflare-worker),
- * que usa uma service account com acesso direto ao Firestore (via REST API/
- * Admin SDK) e não fica sujeito a estas regras do lado do cliente. Estas
- * regras protegem o acesso direto ao Firestore feito pelas apps de família
- * e de administração.
+ * IMPORTANTE — o fluxo de break-glass (os 3 métodos de acesso, papel
+ * 'utilizador') NUNCA passa por aqui: o frontend fala sempre com o
+ * Cloudflare Worker (backend/cloudflare-worker), que usa uma service
+ * account com acesso direto ao Firestore (via REST API/Admin SDK) e não
+ * fica sujeito a estas regras do lado do cliente. Estas regras protegem
+ * apenas o acesso direto ao Firestore feito pela app de profissional/
+ * superadmin (nunca pelo frontend do papel 'utilizador').
+ *
+ * A família está suspensa nesta revisão — sem custom claim própria, sem
+ * regras de família nesta versão do documento.
  */
 rules_version = '2';
 
@@ -32,101 +38,81 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function papel() {
-      return request.auth.token.papel;
+    function papeis() {
+      return request.auth.token.papeis;
     }
 
-    function isProfissionalOuAdmin() {
-      return autenticado() && (papel() == 'profissional' || papel() == 'admin');
+    function temPapel(p) {
+      return autenticado() && (p in papeis());
     }
 
-    function isAdmin() {
-      return autenticado() && papel() == 'admin';
+    function isProfissional() {
+      return temPapel('profissional');
+    }
+
+    function isSuperadmin() {
+      return temPapel('superadmin');
     }
 
     function isAuditor() {
-      // Sub-papel dentro da equipa administradora (funcao_auditor = true).
-      return isAdmin() && request.auth.token.funcao_auditor == true;
+      // Sub-papel dentro do superadmin (funcao_auditor = true).
+      return isSuperadmin() && request.auth.token.funcao_auditor == true;
     }
 
-    function isFamilia() {
-      return autenticado() && papel() == 'familia';
+    // Um profissional só pode aceder aos pacientes que ele próprio criou;
+    // o superadmin não tem essa restrição.
+    function ehCriadorDoPaciente(pacienteId) {
+      return isProfissional() &&
+        get(/databases/$(database)/documents/pacientes/$(pacienteId)).data.criado_por_id == request.auth.token.profissional_id;
     }
 
-    // Verifica se a conta de família autenticada está ligada ao paciente,
-    // através da coleção familia_paciente (chave composta
-    // "{conta_familia_id}_{paciente_id}", ver firestore-schema.md).
-    function familiaLigadaAoPaciente(pacienteId) {
-      return isFamilia() &&
-        exists(/databases/$(database)/documents/familia_paciente/$(request.auth.token.conta_familia_id + '_' + pacienteId));
-    }
-
-    // Campos que a família pode escrever num documento de `pacientes`:
-    // apenas contacto/morada e pedido de revogação — nunca dados clínicos
-    // (dados clínicos vivem sempre em dados_nivel1, nunca em pacientes).
-    function apenasCamposPermitidosFamilia() {
-      return request.resource.data.diff(resource.data).affectedKeys()
-        .hasOnly(['contacto_emergencia', 'morada', 'pedido_revogacao_pulseira']);
+    function podeGerirPaciente(pacienteId) {
+      return isSuperadmin() || ehCriadorDoPaciente(pacienteId);
     }
 
     // ------------------------------------------------------------------
     // dados_nivel1 — dados clínicos essenciais (o coração do sistema)
     // Documento por paciente: /dados_nivel1/{pacienteId}
+    // Leitura pelo papel 'utilizador' (break-glass) NUNCA passa por aqui
+    // — vai sempre através do Worker, com a service account. Estas
+    // regras cobrem só o acesso direto da app de profissional/superadmin.
     // ------------------------------------------------------------------
     match /dados_nivel1/{pacienteId} {
-      // A família ligada ao paciente pode LER — nunca ESCREVER, em
-      // nenhuma circunstância (nem em modo de "proposta" não verificada).
-      allow read: if isProfissionalOuAdmin() || familiaLigadaAoPaciente(pacienteId);
-
-      // Só profissionais/equipa administradora podem escrever dados
-      // clínicos (create/update/delete).
-      allow write: if isProfissionalOuAdmin();
+      allow read: if podeGerirPaciente(pacienteId);
+      allow write: if podeGerirPaciente(pacienteId);
     }
 
     // ------------------------------------------------------------------
     // pacientes — dados administrativos/identificativos (não clínicos)
     // ------------------------------------------------------------------
     match /pacientes/{pacienteId} {
-      // Profissionais/admin: acesso total (gestão do piloto).
-      allow read, write: if isProfissionalOuAdmin();
+      // Superadmin: acesso total.
+      allow read, write: if isSuperadmin();
 
-      // Família: só lê o(s) seu(s) paciente(s) e só escreve os campos
-      // administrativos explicitamente permitidos (nunca dados clínicos,
-      // que nem sequer residem nesta coleção).
-      allow read: if familiaLigadaAoPaciente(pacienteId);
-      allow update: if familiaLigadaAoPaciente(pacienteId) && apenasCamposPermitidosFamilia();
+      // Profissional: só o(s) paciente(s) que ele próprio criou.
+      allow read, update, delete: if ehCriadorDoPaciente(pacienteId);
 
-      // A família nunca cria pacientes diretamente no Firestore — a
-      // criação de paciente + registo em familia_paciente é feita numa
-      // transação atómica do lado do servidor (Cloud Function), não duas
-      // escritas soltas sujeitas a regras separadas. Nesta iteração o
-      // create fica reservado a admin.
-      allow create: if isAdmin();
-      allow delete: if isAdmin();
+      // Criação: qualquer profissional pode criar um paciente novo, desde
+      // que se registe a si próprio como criado_por_id (nunca em nome de
+      // outro profissional).
+      allow create: if isProfissional() &&
+        request.resource.data.criado_por_id == request.auth.token.profissional_id;
     }
 
     // ------------------------------------------------------------------
-    // contas_familia — perfil da própria conta de família
+    // documentos — referências aos ficheiros digitalizados (RGPD + termo
+    // de responsabilidade) no Firebase Storage
     // ------------------------------------------------------------------
-    match /contas_familia/{contaId} {
-      allow read, write: if isAdmin();
-      // A família só lê/edita o seu próprio documento (contacto, telefone).
-      allow read: if isFamilia() && request.auth.token.conta_familia_id == contaId;
-      allow update: if isFamilia() && request.auth.token.conta_familia_id == contaId &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'telefone']);
-    }
-
-    // ------------------------------------------------------------------
-    // familia_paciente — tabela de ligação conta_familia <-> paciente
-    // ------------------------------------------------------------------
-    match /familia_paciente/{ligacaoId} {
-      allow read, write: if isProfissionalOuAdmin();
-      // A família só lê as suas próprias ligações — nunca escreve
-      // (a ligação é sempre criada/gerida pela equipa administradora,
-      // para impedir que uma conta se auto-associe a um paciente alheio).
-      allow read: if isFamilia() &&
-        resource.data.conta_familia_id == request.auth.token.conta_familia_id;
-      allow write: if false;
+    match /documentos/{documentoId} {
+      allow read, write: if isSuperadmin();
+      // Profissional: só documentos de pacientes que criou. Como não há
+      // paciente_id disponível em resource.data para um create ainda não
+      // validado noutra coleção, confia-se no campo enviado no próprio
+      // pedido (request.resource.data.paciente_id) e verifica-se a posse.
+      allow read, write: if isProfissional() &&
+        ehCriadorDoPaciente(resource.data.paciente_id);
+      allow create: if isProfissional() &&
+        ehCriadorDoPaciente(request.resource.data.paciente_id);
     }
 
     // ------------------------------------------------------------------
@@ -135,41 +121,60 @@ service cloud.firestore {
     match /acessos/{acessoId} {
       // Escrita: NUNCA diretamente do cliente. Este registo é criado
       // exclusivamente pelo Cloudflare Worker, autenticado com uma
-      // service account (Admin SDK), que não passa pelas Security Rules
-      // do cliente da mesma forma — mas, por segurança em profundidade,
-      // bloqueamos explicitamente qualquer escrita vinda de um ID token
-      // de utilizador final (profissional, admin ou família).
+      // service account (Admin SDK) — por segurança em profundidade,
+      // bloqueia-se explicitamente qualquer escrita vinda de um ID token
+      // de utilizador final.
       allow write: if false;
 
-      // Leitura: reservada a quem tem funcao_auditor==true, ou a admin.
-      allow read: if isAuditor() || isAdmin();
+      // Leitura: reservada a quem tem funcao_auditor==true (sub-papel do
+      // superadmin), ou ao superadmin em geral.
+      allow read: if isAuditor() || isSuperadmin();
     }
 
     // ------------------------------------------------------------------
-    // profissionais, lotes, pulseiras — gestão exclusiva da equipa
-    // administradora
+    // profissionais — contas dos profissionais/utilizadores/superadmin.
+    // Gestão exclusiva do superadmin (secção "Contas").
     // ------------------------------------------------------------------
     match /profissionais/{profissionalId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isSuperadmin();
+      // Cada conta pode ler o seu próprio documento (para mostrar o nome,
+      // papéis, etc. na app) — nunca escrever (pin_hash e papéis só
+      // mudam pela mão do superadmin).
+      allow read: if autenticado() && request.auth.token.profissional_id == profissionalId;
     }
 
+    // ------------------------------------------------------------------
+    // lotes, pulseiras — gestão exclusiva do superadmin/profissional
+    // ------------------------------------------------------------------
     match /lotes/{loteId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isSuperadmin();
     }
 
     match /pulseiras/{pulseiraId} {
-      allow read, write: if isAdmin();
-      // Nota: o Worker consulta pulseiras pelo token durante o scan, mas
-      // fá-lo com a service account (fora do alcance destas regras). A
-      // família pode "pedir revogação" da sua pulseira através do campo
-      // pedido_revogacao_pulseira em /pacientes — nunca escrevendo aqui
-      // diretamente.
+      allow read, write: if isSuperadmin();
+      // O profissional pode ler pulseiras dos pacientes que criou (para
+      // "Solicitar pulseira") e atribuir uma pulseira não atribuída a um
+      // desses pacientes — nunca a pacientes de outro profissional.
+      allow read: if isProfissional() &&
+        (resource.data.paciente_id == null || ehCriadorDoPaciente(resource.data.paciente_id));
+      allow update: if isProfissional() &&
+        resource.data.estado == 'nao_atribuida' &&
+        ehCriadorDoPaciente(request.resource.data.paciente_id);
+      // Nota: o Worker consulta pulseiras pelo token durante o break-glass
+      // com a service account (fora do alcance destas regras).
     }
 
     // ------------------------------------------------------------------
+    // contas_familia, familia_paciente — SUSPENSAS nesta revisão (ver
+    // "Pivô para produção", CLAUDE.md). Sem uso: bloqueadas por defeito,
+    // tal como qualquer outra coleção não listada.
+    // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
     // Negação por defeito: qualquer coleção não listada acima (incluindo
-    // futuras coleções de Fase 2/3 como instituicoes, pedidos,
-    // consultas_validacao — ver firestore-schema.md) fica bloqueada.
+    // contas_familia, familia_paciente, e futuras coleções de Fase 2/4
+    // como instituicoes, consultas_validacao — ver firestore-schema.md)
+    // fica bloqueada.
     // ------------------------------------------------------------------
     match /{document=**} {
       allow read, write: if false;

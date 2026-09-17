@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "frontend/**"
+      - "docs/**"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch: {}
 
@@ -30,10 +30,10 @@ jobs:
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Preparar artefacto (só frontend/, é um site estático)
+      - name: Preparar artefacto (só docs/, é um site estático)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: frontend
+          path: docs
 
       - name: Deploy no GitHub Pages
         id: deployment

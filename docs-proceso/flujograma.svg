@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1900" font-family="-apple-system,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5B6663"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="1900" fill="#F6F5F1"/>
+
+  <!-- Title -->
+  <text x="500" y="45" text-anchor="middle" font-size="24" font-weight="700" fill="#0E2A3B">SAVI — Flujograma del proceso de construcción y despliegue</text>
+  <text x="500" y="70" text-anchor="middle" font-size="13" fill="#5B6663">De la lectura de requisitos a la demo publicada — herramientas, puntos críticos y sugerencias</text>
+
+  <!-- Legend -->
+  <g transform="translate(650,90)">
+    <rect x="0" y="0" width="14" height="14" rx="3" fill="#E7F3EC" stroke="#1E6B45"/>
+    <text x="20" y="11" font-size="11" fill="#16211F">Paso sin fricción</text>
+    <rect x="150" y="0" width="14" height="14" rx="3" fill="#FBF3D9" stroke="#8A6D00"/>
+    <text x="170" y="11" font-size="11" fill="#16211F">Punto crítico</text>
+  </g>
+
+  <!-- Phase bands -->
+  <rect x="40" y="130" width="920" height="140" rx="16" fill="#EFEDE4"/>
+  <text x="60" y="155" font-size="14" font-weight="700" fill="#0E2A3B">FASE A · Especificación</text>
+
+  <rect x="40" y="290" width="920" height="420" rx="16" fill="#E9E6DC"/>
+  <text x="60" y="315" font-size="14" font-weight="700" fill="#0E2A3B">FASE B · Construcción de la demo</text>
+
+  <rect x="40" y="730" width="920" height="900" rx="16" fill="#EFEDE4"/>
+  <text x="60" y="755" font-size="14" font-weight="700" fill="#0E2A3B">FASE C · Publicación en GitHub Pages</text>
+
+  <rect x="40" y="1650" width="920" height="180" rx="16" fill="#E9E6DC"/>
+  <text x="60" y="1675" font-size="14" font-weight="700" fill="#0E2A3B">FASE D · Validación</text>
+
+  <!-- Node template usage: rect + title + tool + flag -->
+
+  <!-- 1 -->
+  <rect x="90" y="175" width="820" height="75" rx="12" fill="#E7F3EC" stroke="#1E6B45" stroke-width="1.5"/>
+  <text x="110" y="200" font-size="14" font-weight="700" fill="#16211F">1. Ingesta de requisitos — CLAUDE.md + 3 docs fuente + mockup HTML</text>
+  <text x="110" y="220" font-size="11.5" fill="#5B6663">Herramientas: Read, python-docx (bash), lectura del mockup de referencia</text>
+  <text x="110" y="237" font-size="11.5" fill="#5B6663">Resultado: modelo de datos, roles, flujo de scan y reglas no negociables confirmadas antes de construir</text>
+
+  <line x1="500" y1="250" x2="500" y2="335" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 2 -->
+  <rect x="90" y="335" width="820" height="80" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="358" font-size="14" font-weight="700" fill="#16211F">2. Construcción de frontend + backend (subagente) ⚠</text>
+  <text x="110" y="378" font-size="11.5" fill="#5B6663">Herramientas: Agent (subagente general-purpose), Write/Edit, bash (node --check)</text>
+  <text x="110" y="395" font-size="11.5" fill="#8A6D00">Crítico: el primer subagente se cortó a mitad (error de API) — hubo que reanudar con un segundo subagente</text>
+  <text x="110" y="410" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: dividir builds grandes en tareas más pequeñas con checkpoints, o verificar progreso a mitad de camino</text>
+
+  <line x1="500" y1="415" x2="500" y2="460" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 3 -->
+  <rect x="90" y="460" width="820" height="70" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="482" font-size="14" font-weight="700" fill="#16211F">3. Empaquetado PWA (manifest, service worker, iconos) ⚠</text>
+  <text x="110" y="502" font-size="11.5" fill="#5B6663">Herramientas: ImageMagick (convert), Write</text>
+  <text x="110" y="518" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: automatizar el bump de SW_VERSION (script/hook) en vez de editarlo a mano cada vez</text>
+
+  <line x1="500" y1="530" x2="500" y2="570" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 4 -->
+  <rect x="90" y="570" width="820" height="120" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="593" font-size="14" font-weight="700" fill="#16211F">4. Diseño responsive (PC/Mac/Android/iPhone/iPad) ⚠</text>
+  <text x="110" y="613" font-size="11.5" fill="#5B6663">Herramientas: Edit sobre CSS, revisión manual (sin navegador headless disponible)</text>
+  <text x="110" y="630" font-size="11.5" fill="#8A6D00">Crítico: 3 vueltas completas (moldura de teléfono → tope de 880px → sin tope) por no acotar el alcance antes</text>
+  <text x="110" y="647" font-size="11.5" fill="#8A6D00">de construir; además, sin navegador headless en el entorno, no se pudo verificar visualmente antes de entregar</text>
+  <text x="110" y="664" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: preguntar el criterio exacto (breakpoints, dispositivos) antes de la primera pasada de diseño</text>
+
+  <line x1="500" y1="690" x2="500" y2="775" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 5 -->
+  <rect x="90" y="775" width="820" height="90" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="798" font-size="14" font-weight="700" fill="#16211F">5. Preparar repo git en la carpeta compartida (Cowork ↔ Mac) ⚠</text>
+  <text x="110" y="818" font-size="11.5" fill="#5B6663">Herramientas: bash (git init/commit) dentro del mount FUSE de la carpeta del usuario</text>
+  <text x="110" y="835" font-size="11.5" fill="#8A6D00">Crítico: el mount no permite borrar/renombrar archivos creados por otros procesos (.git, .DS_Store, zip) —</text>
+  <text x="110" y="850" font-size="11.5" fill="#8A6D00">bloqueó limpiar el repo directamente; hubo que trabajar en un repo temporal y copiar el resultado</text>
+
+  <line x1="500" y1="865" x2="500" y2="905" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 6 -->
+  <rect x="90" y="905" width="820" height="95" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="928" font-size="14" font-weight="700" fill="#16211F">6. Intentos de dar acceso a GitHub vía token ⚠</text>
+  <text x="110" y="948" font-size="11.5" fill="#5B6663">Herramientas: ninguna (bloqueado por política) — se pidió PAT fine-grained y luego token clásico</text>
+  <text x="110" y="965" font-size="11.5" fill="#8A6D00">Crítico: varias idas y vueltas — el usuario esperaba la misma facilidad que en otro proyecto con Claude Code</text>
+  <text x="110" y="980" font-size="11.5" fill="#8A6D00">(credenciales locales), pero aquí no hay conector OAuth de GitHub disponible ni se aceptan tokens en chat</text>
+  <text x="110" y="994" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: aclarar al inicio del proyecto qué vía de acceso a GitHub es viable (web, terminal propio, conector)</text>
+
+  <line x1="500" y1="1000" x2="500" y2="1040" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 7 -->
+  <rect x="90" y="1040" width="820" height="105" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="1063" font-size="14" font-weight="700" fill="#16211F">7. Subida por la interfaz web de GitHub (drag &amp; drop) ⚠</text>
+  <text x="110" y="1083" font-size="11.5" fill="#5B6663">Herramientas: Finder (Cmd+Shift+.) + github.com/upload, más tarde "Create new file" para rutas ocultas</text>
+  <text x="110" y="1100" font-size="11.5" fill="#8A6D00">Crítico: el navegador/GitHub filtró silenciosamente los archivos ocultos (.github, .nojekyll) — faltaron</text>
+  <text x="110" y="1115" font-size="11.5" fill="#8A6D00">sin ningún aviso, y eso alteró el resultado final sin que fuera evidente de inmediato</text>
+  <text x="110" y="1132" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: usar "Add file → Create new file" con la ruta escrita a mano para cualquier archivo oculto</text>
+
+  <line x1="500" y1="1145" x2="500" y2="1185" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 8 -->
+  <rect x="90" y="1185" width="820" height="110" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="1208" font-size="14" font-weight="700" fill="#16211F">8. Configurar GitHub Pages: Source = GitHub Actions (1er intento) ⚠</text>
+  <text x="110" y="1228" font-size="11.5" fill="#5B6663">Herramientas: Settings → Pages del repo</text>
+  <text x="110" y="1245" font-size="11.5" fill="#8A6D00">Crítico: sin el workflow subido (paso 7), GitHub usó su build automático de Jekyll y publicó el README</text>
+  <text x="110" y="1260" font-size="11.5" fill="#8A6D00">renderizado en vez de la app — sin error visible, solo se detectó al mirar la URL publicada</text>
+  <text x="110" y="1277" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: verificar visualmente la URL publicada como paso estándar tras cualquier cambio de Pages</text>
+
+  <line x1="500" y1="1295" x2="500" y2="1335" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 9 -->
+  <rect x="90" y="1335" width="820" height="95" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="1358" font-size="14" font-weight="700" fill="#16211F">9. Intento por terminal: git push con credencial equivocada ⚠</text>
+  <text x="110" y="1378" font-size="11.5" fill="#5B6663">Herramientas: Terminal del usuario, git, llavero de macOS (osxkeychain)</text>
+  <text x="110" y="1395" font-size="11.5" fill="#8A6D00">Crítico: 403 — el llavero tenía cacheada una credencial de otra cuenta ("Delfos-IQ") sin permiso sobre</text>
+  <text x="110" y="1410" font-size="11.5" fill="#8A6D00">el repo "pulseiraSAVI"; confusión hasta identificar que eran cuentas distintas</text>
+  <text x="110" y="1424" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: correr "gh auth status" antes de cualquier push para confirmar la cuenta activa</text>
+
+  <line x1="500" y1="1430" x2="500" y2="1470" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 10 -->
+  <rect x="90" y="1470" width="820" height="110" rx="12" fill="#FBF3D9" stroke="#8A6D00" stroke-width="1.5"/>
+  <text x="110" y="1493" font-size="14" font-weight="700" fill="#16211F">10. Cambiar a "Deploy from a branch" — renombrar frontend/ a docs/ ⚠</text>
+  <text x="110" y="1513" font-size="11.5" fill="#5B6663">Herramientas: bash (mv, touch .nojekyll), Edit (README), GitHub web (Create new file + Settings → Pages)</text>
+  <text x="110" y="1530" font-size="11.5" fill="#8A6D00">Crítico: "Deploy from a branch" solo admite carpeta / o /docs — esta restricción no se conocía cuando se</text>
+  <text x="110" y="1545" font-size="11.5" fill="#8A6D00">nombró la carpeta "frontend/", obligando a renombrar y re-subir después de ya tener todo publicado</text>
+  <text x="110" y="1562" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: decidir el método de deploy (rama vs. Actions) antes de fijar la estructura de carpetas</text>
+
+  <line x1="500" y1="1580" x2="500" y2="1625" stroke="#5B6663" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 11 -->
+  <rect x="90" y="1695" width="820" height="90" rx="12" fill="#E7F3EC" stroke="#1E6B45" stroke-width="1.5"/>
+  <text x="110" y="1718" font-size="14" font-weight="700" fill="#16211F">11. Verificación final — demo pública funcionando</text>
+  <text x="110" y="1738" font-size="11.5" fill="#5B6663">Herramientas: navegador (captura del usuario), checklist de flujos (profesional / familia / admin)</text>
+  <text x="110" y="1755" font-size="11.5" fill="#1E6B45">Resultado: https://pulseirasavi.github.io/Pulseira-Savi/ — login real, prompt de instalación PWA visible</text>
+  <text x="110" y="1770" font-size="11" fill="#5B6663" font-style="italic">Sugerencia: repetir esta verificación visual después de cada cambio futuro de Pages/estructura</text>
+
+</svg>

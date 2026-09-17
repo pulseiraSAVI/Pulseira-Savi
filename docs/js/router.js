@@ -1,19 +1,23 @@
 /* router.js
- * Router simples por hash, com guarda de rota por papel.
- * Rotas:
- *   #/login-profissional
- *   #/login-familia
- *   #/scan
- *   #/nivel1/:pulseiraId
- *   #/erro/:tipo
- *   #/familia/pacientes
- *   #/familia/paciente/:id
+ * Router simples por hash, com guarda de rota por papel ativo da sessão.
+ * Pivô de produção (15/09/2026) — família suspensa (sem rotas), Nível 2
+ * eliminado (sem rota). Rotas:
+ *   #/identificacao
+ *   #/escolha-papel
+ *   #/utilizador/metodo
+ *   #/utilizador/pulseira
+ *   #/utilizador/numero-utente
+ *   #/utilizador/identidade
+ *   #/nivel1/resultado
+ *   #/profissional/pacientes
+ *   #/profissional/nivel1/:pacienteId
  *   #/admin/dashboard
  *   #/admin/pacientes
  *   #/admin/nivel1/:pacienteId
  *   #/admin/tokens
- *   #/admin/profissionais
+ *   #/admin/contas
  *   #/admin/auditoria
+ *   #/erro/:tipo
  */
 (function (global) {
   "use strict";
@@ -27,11 +31,18 @@
     return parts;
   }
 
+  function homeParaSessao(sessao) {
+    if (!sessao) return "#/identificacao";
+    if (sessao.papelAtivo === "superadmin") return "#/admin/dashboard";
+    if (sessao.papelAtivo === "profissional") return "#/profissional/pacientes";
+    return "#/utilizador/metodo";
+  }
+
   function papelPermitido(rota, sessao) {
     if (!sessao) return false;
-    if (rota.indexOf("familia") === 0) return sessao.papel === "familia";
-    if (rota.indexOf("admin") === 0) return sessao.papel === "admin";
-    if (rota === "scan" || rota === "nivel1") return sessao.papel === "profissional" || sessao.papel === "admin";
+    if (rota === "utilizador" || rota === "nivel1") return sessao.papelAtivo === "utilizador";
+    if (rota === "profissional") return sessao.papelAtivo === "profissional";
+    if (rota === "admin") return sessao.papelAtivo === "superadmin";
     return true;
   }
 
@@ -40,14 +51,14 @@
     var sessao = authSim.getSessao();
 
     if (parts.length === 0) {
-      parts = ["login-profissional"];
+      parts = ["identificacao"];
     }
 
     var rota = parts[0];
-    var rotasPublicas = ["login-profissional", "login-familia", "erro"];
+    var rotasPublicas = ["identificacao", "escolha-papel", "erro"];
 
     if (rotasPublicas.indexOf(rota) === -1 && !sessao) {
-      global.location.hash = "#/login-profissional";
+      global.location.hash = "#/identificacao";
       return;
     }
 
@@ -59,33 +70,49 @@
     appEl.innerHTML = "";
 
     switch (rota) {
-      case "login-profissional":
-        viewLoginProfissional(appEl);
+      case "identificacao":
+        viewIdentificacao(appEl);
         break;
-      case "login-familia":
-        viewLoginFamilia(appEl);
+      case "escolha-papel":
+        viewEscolhaPapel(appEl);
         break;
-      case "scan":
-        viewScan(appEl);
+      case "utilizador":
+        renderUtilizador(appEl, parts.slice(1));
         break;
       case "nivel1":
-        viewResultadoNivel1(appEl, parts[1]);
+        viewResultadoNivel1(appEl);
         break;
       case "erro":
         viewErro(appEl, parts[1]);
         break;
-      case "familia":
-        if (parts[1] === "paciente" && parts[2]) {
-          viewFamiliaPacienteDetalhe(appEl, parts[2]);
-        } else {
-          viewFamiliaPacientes(appEl);
-        }
+      case "profissional":
+        renderProfissional(appEl, parts.slice(1));
         break;
       case "admin":
         renderAdmin(appEl, parts.slice(1), sessao);
         break;
       default:
-        global.location.hash = sessao ? (sessao.papel === "familia" ? "#/familia/pacientes" : (sessao.papel === "admin" ? "#/admin/dashboard" : "#/scan")) : "#/login-profissional";
+        global.location.hash = homeParaSessao(sessao);
+    }
+  }
+
+  function renderUtilizador(el, parts) {
+    var sub = parts[0] || "metodo";
+    switch (sub) {
+      case "metodo": viewUtilizadorMetodo(el); break;
+      case "pulseira": viewUtilizadorPulseira(el); break;
+      case "numero-utente": viewUtilizadorNumeroUtente(el); break;
+      case "identidade": viewUtilizadorIdentidade(el); break;
+      default: viewUtilizadorMetodo(el);
+    }
+  }
+
+  function renderProfissional(el, parts) {
+    var sub = parts[0] || "pacientes";
+    switch (sub) {
+      case "pacientes": viewPacientesLista(el, "profissional"); break;
+      case "nivel1": viewNivel1Form(el, parts[1], "profissional"); break;
+      default: viewPacientesLista(el, "profissional");
     }
   }
 
@@ -93,10 +120,10 @@
     var sub = parts[0] || "dashboard";
     switch (sub) {
       case "dashboard": viewAdminDashboard(el); break;
-      case "pacientes": viewAdminPacientes(el); break;
-      case "nivel1": viewAdminNivel1Form(el, parts[1]); break;
+      case "pacientes": viewPacientesLista(el, "admin"); break;
+      case "nivel1": viewNivel1Form(el, parts[1], "admin"); break;
       case "tokens": viewAdminTokens(el); break;
-      case "profissionais": viewAdminProfissionais(el); break;
+      case "contas": viewAdminContas(el); break;
       case "auditoria":
         if (!sessao.funcao_auditor) {
           global.location.hash = "#/erro/acesso_negado";
@@ -121,10 +148,8 @@
   };
 
   // Redireciona automaticamente para o ecrã de "sessão expirada" quando o
-  // temporizador de inatividade dispara — e repete o scan após novo login
-  // (o próprio ecrã de scan trata da repetição, ver views/scan.js).
-  authSim.onExpirar(function (papelAntigo) {
-    global.SAVI_lastPapelAntesDeExpirar = papelAntigo;
+  // temporizador de inatividade dispara.
+  authSim.onExpirar(function () {
     global.location.hash = "#/erro/sessao_expirada";
     render();
   });

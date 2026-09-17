@@ -1,100 +1,153 @@
-# Schema Firestore — SAVI (Fase 1, piloto)
+# Schema Firestore — SAVI (pivô de produção, revisão 15/09/2026)
 
-> Tradução do desenho original em SQL (`SAVI_Arquitetura_Tecnica.docx` §5/§14)
-> para coleções Firestore, região `europe-west`. Nomenclatura de campos
-> mantida em português, alinhada com `frontend/js/mockdb.js` (fonte da
-> verdade dos nomes finais usados nesta iteração).
+> Substitui por completo a versão anterior deste documento (modelo
+> família/profissional clínico/equipa administradora/auditor). Ver
+> `CLAUDE.md`, secção "Pivô para produção", para o contexto completo —
+> em caso de conflito, o `CLAUDE.md` manda.
 >
-> **Fora de âmbito nesta iteração — dormente, não implementado:** as
-> coleções `instituicoes`, `pedidos` e `consultas_validacao` pertencem às
-> Fases 2/3 (profissionais externos, acesso por pesquisa, integração
-> RSE/SNS 24) e **não existem** neste Firestore. Não criar estas coleções
-> "por via das dúvidas" — ver CLAUDE.md do projeto.
+> **`contas_familia` e `familia_paciente` ficam sem uso enquanto a família
+> estiver suspensa.** As definições destas duas coleções mantêm-se no
+> fundo deste documento só por referência histórica — não criar dados
+> nelas nem escrever regras que dependam delas nesta iteração.
 
 ## Convenções gerais
 
 - Todas as datas/timestamps em UTC, tipo Firestore `timestamp` (não string),
-  exceto onde indicado `date` (string `YYYY-MM-DD`, para campos que só
-  fazem sentido como data civil, ex. `data_nascimento`).
+  exceto onde indicado `date` (string `YYYY-MM-DD`).
 - IDs de documento: UUID v4 gerado no cliente/Worker, exceto onde indicado
-  chave composta.
+  chave composta ou id == outro id (`dados_nivel1/{pacienteId}`).
 - Cifra em repouso: nativa do Firestore (Google-managed encryption),
   reforçada por regras de acesso restritivas (`firestore.rules`). Cifra em
-  trânsito: TLS obrigatório (garantido pelo próprio Firestore/Worker).
+  trânsito: TLS obrigatório.
+- Papéis (`profissionais.papeis`, array de string): `profissional` |
+  `utilizador` | `superadmin`. `funcao_auditor` é um booleano à parte,
+  só relevante quando `papeis` inclui `superadmin`.
+
+---
+
+## `profissionais/{profissionalId}`
+
+Uma única conta por pessoa — pode ter os papéis `profissional` e
+`utilizador` ao mesmo tempo (a app pergunta com qual entra em cada
+sessão). `superadmin` é tratado como papel próprio, sem a restrição de
+"só os meus pacientes".
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `nome` | string | |
+| `credencial_ordem` | string, único | Nº de Ordem médica — identificador de login |
+| `pin_hash` | string | SHA-256 hex do PIN alfanumérico de 5 caracteres. **Nunca texto simples**, nem nesta simulação |
+| `papeis` | array\<string\> | Subconjunto de `profissional`, `utilizador`, `superadmin` |
+| `funcao_auditor` | boolean | Só tem efeito quando `papeis` inclui `superadmin`; dá acesso de leitura a `acessos` |
+| `servico` | string | Ex.: "Urgência Pediátrica" |
+| `especialidade` | string | Usado como "gestor do caso" nos pacientes que este profissional cria |
+| `instituicao_servico` | string | Instituição + serviço, mostrado como dados do gestor do caso |
+| `telefone_institucional` | string | |
+| `ativo` | boolean | |
+| `criado_em` | timestamp | |
+
+**Índices sugeridos:** índice de campo único em `credencial_ordem` (login).
+
+**Registo de contas:** por decisão do CLAUDE.md, só o `superadmin` cria
+contas diretamente (secção "Contas" da vista de superadmin) — não existe
+auto-registo nesta iteração.
 
 ---
 
 ## `pacientes/{pacienteId}`
 
-Dados administrativos e de identificação — **nunca dados clínicos** (esses
-vivem em `dados_nivel1`).
+Dados administrativos e de identificação — **nunca dados clínicos**
+(vivem em `dados_nivel1`). Criado exclusivamente pelo profissional que
+o regista (ou pelo superadmin).
 
 | Campo | Tipo | Notas |
 |---|---|---|
-| `nome` | string | |
-| `data_nascimento` | date (string `YYYY-MM-DD`) | |
-| `contacto_emergencia` | string | Editável pela família (rules) |
-| `morada` | string | Editável pela família (rules); não existia no SQL original, adicionado para o pedido de contacto/morada |
-| `referencia_sistema_ext` | string | Usado só no Nível 2 |
-| `estado_consentimento` | string enum | `pendente` \| `ativo` \| `revogado` |
-| `consentimento_prestado_por` | string enum | `proprio` \| `tutor_legal` |
-| `consentimento_nome_tutor` | string \| null | |
-| `consentimento_documento_ref` | string \| null | |
-| `consentimento_data` | date \| null | |
-| `origem` | string enum | `piloto` \| `profissional_externo` \| `familia` (os dois primeiros valores ativos na Fase 1; `profissional_externo` é campo já presente no schema original mas sem fluxo de Fase 2 implementado) |
-| `profissional_solicitante_id` | string \| null (ref) | id em `profissionais` |
-| `pedido_revogacao_pulseira` | boolean | Sinalização feita pela família (rules); processada manualmente pela equipa administradora |
+| `nome` | string | Nome completo |
+| `data_nascimento` | date | |
+| `sexo` | string enum | `M` \| `F` \| `outro` — usado no método de acesso por identidade |
+| `numero_utente` | string, único | Usado no método de acesso por número de utente |
+| `morada` | string | |
+| `contacto_familia` | string | Contacto de familiares |
+| `contacto_emergencia` | string | Contacto de emergência (pode coincidir com o de familiares) |
+| `gestor_do_caso` | map | `{ nome, credencial_ordem, especialidade, instituicao_servico, telefone_institucional }` — normalmente espelha o profissional criador, mas é editável separadamente (o gestor do caso pode não ser quem regista o paciente na app) |
+| `estado_consentimento` | string enum | `pendente` \| `ativo` \| `revogado` — assinatura em papel (RGPD + termo de responsabilidade), arquivada em `documentos` |
+| `criado_por_id` | string (ref) | id em `profissionais` — só este profissional (ou superadmin) vê/edita este paciente |
 | `criado_em` | timestamp | |
 
-**Índices sugeridos:** nenhum índice composto necessário na Fase 1 (≤50
-pacientes); índice de campo único automático em `estado_consentimento` e
-`origem` chega para os filtros do dashboard admin.
+**Índices sugeridos:** índice de campo único em `numero_utente` (consulta
+principal do Worker no método 2); índice em `criado_por_id` (vista de
+profissional, "só os meus pacientes"); sem índice composto necessário
+para o método de identidade na Fase 1 (≤50 pacientes) — o Worker filtra
+`nome` + `data_nascimento` + `sexo` em memória a partir de uma leitura
+completa da coleção.
 
 ---
 
 ## `dados_nivel1/{pacienteId}`
 
-Documento único por paciente (id do documento == `pacienteId`, não um UUID
-próprio — simplifica a leitura no Worker: `GET /dados_nivel1/{pacienteId}`
-em vez de consulta por `paciente_id`).
+Documento único por paciente (id do documento == `pacienteId`). Estrutura
+nova — substitui por completo o modelo anterior de "cabeçalho + 4
+separadores". Corresponde ao separador **Algoritmo** do ecrã de Nível 1.
 
 | Campo | Tipo | Notas |
 |---|---|---|
-| `peso_kg` | number \| null | |
-| `altura_cm` | number \| null | |
+| `peso_kg` | number \| null | Cartão "Biometria" |
+| `altura_cm` | number \| null | Cartão "Biometria"; usado também para a superfície corporal (fórmula de Mosteller, calculada no cliente, não guardada) |
 | `biometria_registada_em` | date \| null | |
-| `alergias` | string | |
-| `grupo_sanguineo` | string | |
-| `diagnosticos_ativos` | string | Texto livre, ICD-10 quando possível |
-| `terapeutica` | string | Com esquema de horas |
-| `medicacao_cronica` | string | |
-| `farmacos_contraindicados` | string | |
+| `alergias` | string | Cartão de destaque próprio (decisão de 9/9/2026, mantida) |
+| `condicao_critica` | string | Substitui `diagnosticos_ativos`; texto livre, ICD-10 quando possível |
+| `esquema_dose` | string | Esquema de dose crítico, com horas quando aplicável |
+| `medicacao_contraindicada` | string | Substitui `farmacos_contraindicados` |
 | `limitacao_terapeutica` | string enum | `sim` \| `nao` \| `nao_aplicavel` |
-| `ventilacao_invasiva` | string enum | `sim` \| `nao` |
-| `vni` | string enum | `sim` \| `nao` |
-| `tecnicas_dialiticas` | string enum | `sim` \| `nao` |
-| `esquema_atuacao_crise` | string | Texto livre |
-| `hospital_referencia` | string | |
-| `hospital_referencia_contacto` | string | |
-| `vacinas` | string | |
+| `esquema_atuacao_crise` | string | Texto livre — risco de descompensação/recomendações; mostrado dentro do cartão "Condição crítica". Mantido por ser um dos 2 itens do modo offline mínimo (alergias + esquema de atuação em crise, decisão de 9/9/2026) |
+| `notas` | string | Cartão "Notas", texto livre |
+| `medicacao_cronica` | string | Medicação crónica + horário habitual — separador "Medicação Habitual", não "Algoritmo" |
 | `escrito_por_id` | string \| null (ref) | id em `profissionais` |
 | `escrito_em` | timestamp \| null | |
 | `verificado_por_id` | string \| null (ref) | id em `profissionais` |
 | `verificado_em` | timestamp \| null | |
-| `estado_verificacao` | string enum | `nao_verificado` \| `verificado` |
+| `estado_verificacao` | string enum | `nao_verificado` \| `verificado` — dupla verificação mantida (decisão de 9/9/2026) |
 | `validado_em` | timestamp \| null | Validação obrigatória a cada 6 meses |
 | `atualizado_em` | timestamp | |
-| `verificacoes_campo` | map | Extensão desta iteração (não existe no SQL original): estado de verificação por campo individual, usado no ecrã de Nível 1 (`{ campo: { estado, por, em } }`). Mantido como sub-mapa em vez de subcoleção por simplicidade — reavaliar se o nº de campos verificáveis crescer muito. |
 
-**Regra crítica:** leitura permitida à família ligada ao paciente; escrita
-exclusiva de `profissional`/`admin` (ver `firestore.rules`).
+**Removidos nesta revisão (não devem aparecer em lado nenhum):**
+`grupo_sanguineo`, `vacinas`, `ventilacao_invasiva`, `vni`,
+`tecnicas_dialiticas`, `hospital_referencia`,
+`hospital_referencia_contacto`, `terapeutica`, `verificacoes_campo`
+(extensão por campo da iteração anterior — substituída por um único
+`estado_verificacao` a nível do documento, mais simples).
 
-**Índices sugeridos:** nenhum — acesso sempre por id do documento
-(`pacienteId`), nunca por query.
+**Regra crítica:** leitura só através do Worker (break-glass, papel
+`utilizador`) ou por quem tem papel `profissional`/`superadmin` (e,
+neste último caso, só o profissional que criou o paciente, exceto
+`superadmin`). Escrita exclusiva de `profissional` (dono do paciente) ou
+`superadmin`.
+
+---
+
+## `documentos/{documentoId}`
+
+Nova coleção — referências aos ficheiros digitalizados no Firebase
+Storage: o termo de responsabilidade e a autorização RGPD, assinados em
+papel pela família (a família já não assina na app, ver "Pivô para
+produção" no CLAUDE.md). Mostrados no separador "Medicação Habitual".
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `paciente_id` | string (ref) | |
+| `tipo` | string enum | `rgpd` \| `termo_responsabilidade` \| `outro` |
+| `nome_ficheiro` | string | |
+| `storage_path` | string | Caminho no Firebase Storage (`documentos/{pacienteId}/{documentoId}.pdf`) — não implementado nesta iteração de simulação, ver `docs/js/mockdb.js` |
+| `enviado_por_id` | string (ref) | id em `profissionais` |
+| `enviado_em` | timestamp | |
+
+**Índices sugeridos:** índice de campo simples em `paciente_id`.
 
 ---
 
 ## `pulseiras/{pulseiraId}`
+
+Sem alterações estruturais relevantes nesta revisão.
 
 | Campo | Tipo | Notas |
 |---|---|---|
@@ -103,21 +156,20 @@ exclusiva de `profissional`/`admin` (ver `firestore.rules`).
 | `lote_id` | string (ref) | id em `lotes` |
 | `estado` | string enum | `nao_atribuida` \| `ativa` \| `desativada` \| `perdida` \| `substituida` |
 | `paciente_id` | string \| null (ref) | id em `pacientes` |
-| `protegida_por_senha` | boolean | |
-| `senha_referencia` | string \| null | Nunca a senha em claro — referência/hash |
-| `revogada_por` | string enum \| null | `familia` \| `equipa` |
 | `atribuida_em` | timestamp \| null | |
 | `desativada_em` | timestamp \| null | |
 | `motivo_desativacao` | string \| null | |
 | `criado_em` | timestamp | |
 
-**Índices sugeridos:** índice de campo único em `token` (consulta principal
-do Worker no `/scan`: `where('token', '==', tokenLido)`); índice em
-`estado` para os filtros do ecrã admin de pulseiras/lotes.
+**Índices sugeridos:** índice de campo único em `token` (consulta
+principal do Worker no método de acesso por pulseira); índice em
+`estado`.
 
 ---
 
 ## `lotes/{loteId}`
+
+Sem alterações.
 
 | Campo | Tipo | Notas |
 |---|---|---|
@@ -131,106 +183,46 @@ do Worker no `/scan`: `where('token', '==', tokenLido)`); índice em
 | `notas` | string | |
 | `criado_em` | timestamp | |
 
-**Índices sugeridos:** nenhum — lista pequena, sem filtros compostos.
-
----
-
-## `profissionais/{profissionalId}`
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| `nome` | string | |
-| `credencial_ordem` | string, único | Login (nº de Ordem) |
-| `servico` | string | |
-| `tipo_relacao` | string enum | `interno` \| `externo` (Fase 1: só `interno` usado) |
-| `instituicao_id` | string \| null (ref) | Reservado para Fase 2 (`instituicoes`, dormente) |
-| `mfa_ativo` | boolean | Obrigatório = `true` na Fase 1 |
-| `funcao_auditor` | boolean | Sub-papel: acesso de leitura a `acessos` |
-| `ativo` | boolean | |
-| `criado_em` | timestamp | |
-| `papel` | string enum | Custom claim espelhada aqui para consulta administrativa: `profissional` \| `admin` |
-
-**Índices sugeridos:** índice de campo único em `credencial_ordem` (login).
-
----
-
-## `contas_familia/{contaId}`
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| `nome` | string | |
-| `email` | string, único | Login |
-| `telefone` | string | |
-| `relacao` | string | Ex.: "mãe", "pai", "tutor legal" |
-| `firebase_uid` | string, único | Liga ao registo do Firebase Auth |
-| `ativo` | boolean | |
-| `criado_em` | timestamp | |
-
-**Índices sugeridos:** índice de campo único em `email`.
-
----
-
-## `familia_paciente/{ligacaoId}`
-
-Tabela de ligação N:N conta_familia ↔ paciente. Em SQL era chave composta
-`(conta_familia_id, paciente_id)`; em Firestore replica-se essa chave
-composta como **id do documento**, no formato:
-
-```
-{conta_familia_id}_{paciente_id}
-```
-
-para permitir `exists()` direto nas Security Rules sem query adicional.
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| `conta_familia_id` | string (ref) | |
-| `paciente_id` | string (ref) | |
-| `criado_em` | timestamp | |
-
-**Índices sugeridos:** índice composto `(conta_familia_id, paciente_id)` —
-coberto automaticamente pelo padrão de id do documento acima, mas manter
-como índice de campo simples em `conta_familia_id` para consultas
-administrativas ("todos os pacientes desta conta").
-
 ---
 
 ## `acessos/{acessoId}`
 
 Audit log do break-glass, alinhado com ISO 27789:2021. **Escrita
-exclusiva do Worker** (nunca do cliente — ver `firestore.rules`).
+exclusiva do Worker.** Agora cobre os 3 métodos de acesso, não só
+pulseira.
 
 | Campo | Tipo | Notas |
 |---|---|---|
-| `pulseira_id` | string \| null (ref) | `null` só nos casos de token totalmente desconhecido ou pedido de eliminação RGPD |
-| `profissional_id` | string \| null (ref) | |
-| `nivel_acedido` | string enum | `nivel_1` \| `nivel_2` \| `negado` |
-| `motivo` | string \| null | Obrigatório para `nivel_2` |
+| `metodo_acesso` | string enum | `pulseira` \| `numero_utente` \| `identidade` |
+| `pulseira_id` | string \| null (ref) | Só preenchido no método `pulseira` |
+| `paciente_id` | string \| null (ref) | `null` só quando o paciente não foi encontrado |
+| `utilizador_id` | string \| null (ref) | id em `profissionais` — quem fez o acesso (papel `utilizador` nessa sessão) |
+| `nivel_acedido` | string enum | `nivel_1` \| `negado` — **`nivel_2` removido, já não existe** |
+| `motivo` | string \| null | Obrigatório no método `identidade`; opcional nos outros |
 | `servico` | string \| null | |
 | `ip_ou_localizacao` | string \| null | |
 | `notificado_titular_em` | timestamp \| null | Preenchido de forma assíncrona após o envio Resend |
 | `acedido_em` | timestamp | |
 
 **Índices sugeridos:**
-- Índice composto `(pulseira_id, acedido_em desc)` — histórico de acessos
-  por paciente (via `pulseira_id`), ordenado por data (usado no ecrã de
-  família "Histórico de acessos").
-- Índice de campo simples em `acedido_em desc` — lista geral de auditoria.
-- Índice de campo simples em `nivel_acedido` — filtro de "acessos negados".
+- Índice composto `(paciente_id, acedido_em desc)`.
+- Índice de campo simples em `acedido_em desc`.
+- Índice de campo simples em `nivel_acedido` e em `metodo_acesso`.
 
 ---
 
-## Fase 2/3 — dormente, não implementada nesta iteração
+## Coleções suspensas — mantidas só por referência, sem uso nesta iteração
 
-As coleções abaixo fazem parte da visão de futuro documentada no Resumo do
-Projeto §10 e **não devem ser criadas no Firestore desta iteração**:
+`contas_familia` e `familia_paciente` existiam no modelo anterior
+(família com app própria). Ficam **sem uso** enquanto a família estiver
+suspensa (ver "Pivô para produção", CLAUDE.md) — não escrever dados
+nelas, não construir regras que dependam delas. Se a família for
+retomada, este documento deve ser atualizado antes de qualquer código.
 
-- `instituicoes` — suporte a profissionais externos (Fase 2).
-- `pedidos` — acesso por pesquisa (nome + data nascimento + sexo, ou nº de
-  utente), sem pulseira física (Fase 2/3) — modelo de segurança ainda por
-  desenhar (motivo obrigatório, notificação, auditoria equivalentes ao
-  acesso por pulseira; ver Questão em aberto nº 3 do CLAUDE.md).
-- `consultas_validacao` — integração nativa com RSE/SNS 24 (Fase 4).
+## Fase 2/4 — dormente, não implementada nesta iteração
 
-Se e quando estas fases avançarem, este documento deve ser atualizado
-antes de qualquer código ou regra de segurança ser escrita para elas.
+`instituicoes` (profissionais externos, Fase 2) e `consultas_validacao`
+(integração nativa RSE/SNS 24, Fase 4) continuam fora de âmbito. A Fase 3
+(acesso por pesquisa de identidade) deixou de ser dormente — foi
+antecipada para a Fase 1 ativa e já está incluída no método `identidade`
+acima.

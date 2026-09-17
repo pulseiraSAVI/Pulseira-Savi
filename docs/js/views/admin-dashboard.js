@@ -1,5 +1,6 @@
-/* views/admin-dashboard.js — dashboard com contadores. É a "vista de
- * equipa administradora"; não existe uma quarta vista "painel de controlo". */
+/* views/admin-dashboard.js — dashboard com contadores da vista de
+ * superadmin. Não existe uma quarta vista "painel de controlo" — é
+ * exatamente este conteúdo. Usa adminNav/statCard de nav-helpers.js. */
 function viewAdminDashboard(root) {
   "use strict";
 
@@ -34,34 +35,11 @@ function viewAdminDashboard(root) {
     statCard(pulseirasProblema, "Pulseiras perdidas/desativadas") +
     statCard(consentimentosPendentes, "Consentimentos pendentes") +
     statCard(naoVerificados, "Registos clínicos não verificados") +
-    statCard(profissionais.filter(function (p) { return p.ativo; }).length, "Profissionais ativos") +
+    statCard(profissionais.filter(function (p) { return p.ativo; }).length, "Contas ativas") +
     statCard(acessosHoje, "Acessos hoje") +
     statCard(acessos.filter(function (a) { return a.nivel_acedido === "negado"; }).length, "Acessos negados (total)") +
     "</div>" +
     "</div>";
-}
 
-function statCard(numero, label) {
-  return '<div class="stat-card"><div class="n">' + numero + '</div><div class="l">' + label + "</div></div>";
-}
-
-function adminNav(sessao, ativo) {
-  function item(hash, label, chave) {
-    var estilo = ativo === chave ? "font-weight:800;color:#fff;" : "color:#C9D8DF;";
-    return '<a href="#/admin/' + hash + '" style="' + estilo + 'text-decoration:none;font-size:13px;margin-right:16px;">' + label + "</a>";
-  }
-  var auditoriaLink = sessao.funcao_auditor ? item("auditoria", "Segurança / Auditoria", "auditoria") : "";
-  return (
-    '<div class="app-topbar" style="flex-wrap:wrap;gap:8px;">' +
-    '<div class="brand">SAVI <small>Equipa administradora</small></div>' +
-    '<div class="user-info">' + sessao.nome + ' <button class="logout" id="btn-sair">Terminar sessão</button></div>' +
-    "</div>" +
-    '<div style="background:var(--navy-2);padding:10px 20px;display:flex;flex-wrap:wrap;">' +
-    item("dashboard", "Dashboard", "dashboard") +
-    item("pacientes", "Pacientes", "pacientes") +
-    item("tokens", "Pulseiras / Lotes", "tokens") +
-    item("profissionais", "Profissionais", "profissionais") +
-    auditoriaLink +
-    "</div>"
-  ).replace('<button class="logout" id="btn-sair">Terminar sessão</button>', '<button class="logout" onclick="authSim.logout();SAVI_router.navegar(\'#/login-profissional\')">Terminar sessão</button>');
+  ligarBotaoSair();
 }

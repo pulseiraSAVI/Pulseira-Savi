@@ -4,11 +4,15 @@
  * Convenção do stack: qualquer alteração a CSS/HTML/JS cacheado tem de vir
  * acompanhada de um bump em SW_VERSION, senão utilizadores que já têm a
  * app instalada continuam a ver a versão antiga indefinidamente.
+ *
+ * v7: pivô de produção de 15/09/2026 — novo modelo de papéis (utilizador/
+ * profissional/superadmin+auditor), 3 métodos de acesso, Nível 1 novo
+ * (cabeçalho + 4 secções de footer), Nível 2 eliminado, família suspensa.
  */
-const SW_VERSION = "savi-v6";
+const SW_VERSION = "savi-v7";
 const CACHE_NAME = `savi-cache-${SW_VERSION}`;
 
-// Caminhos relativos ao scope do service worker (raiz de frontend/), para
+// Caminhos relativos ao scope do service worker (raiz de docs/), para
 // funcionar tanto na raiz do domínio como num subcaminho de GitHub Pages
 // (ex. https://<user>.github.io/savi/).
 const ASSETS = [
@@ -16,23 +20,26 @@ const ASSETS = [
   "./index.html",
   "./manifest.webmanifest",
   "./css/styles.css",
+  "./js/hash-util.js",
   "./js/mockdb.js",
   "./js/worker-sim.js",
   "./js/auth-sim.js",
   "./js/router.js",
   "./js/app.js",
-  "./js/views/login-profissional.js",
-  "./js/views/login-familia.js",
-  "./js/views/scan.js",
+  "./js/views/nav-helpers.js",
+  "./js/views/identificacao.js",
+  "./js/views/escolha-papel.js",
+  "./js/views/utilizador-metodo.js",
+  "./js/views/utilizador-pulseira.js",
+  "./js/views/utilizador-numero-utente.js",
+  "./js/views/utilizador-identidade.js",
   "./js/views/resultado-nivel1.js",
   "./js/views/erro.js",
-  "./js/views/familia-pacientes.js",
-  "./js/views/familia-paciente-detalhe.js",
+  "./js/views/pacientes-lista.js",
+  "./js/views/nivel1-form.js",
   "./js/views/admin-dashboard.js",
-  "./js/views/admin-pacientes.js",
-  "./js/views/admin-nivel1-form.js",
   "./js/views/admin-tokens.js",
-  "./js/views/admin-profissionais.js",
+  "./js/views/admin-contas.js",
   "./js/views/admin-auditoria.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
