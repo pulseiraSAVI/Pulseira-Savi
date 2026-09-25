@@ -89,8 +89,19 @@ service cloud.firestore {
       // Superadmin: acesso total.
       allow read, write: if isSuperadmin();
 
-      // Profissional: só o(s) paciente(s) que ele próprio criou.
-      allow read, update, delete: if ehCriadorDoPaciente(pacienteId);
+      // Profissional: só o(s) paciente(s) que ele próprio criou. Comparação
+      // DIRETA a resource.data (não via ehCriadorDoPaciente/get()) de
+      // propósito: uma regra de "list" só é aceite pelo Firestore sem
+      // rejeição antecipada quando consegue ser verificada estaticamente
+      // contra o filtro `where` da própria query (ver
+      // listPacientesDoProfissional em firestore-real.js) — uma regra que
+      // faz get() sobre o PRÓPRIO documento que está a ser listado (como
+      // ehCriadorDoPaciente fazia aqui) falha com "Missing or insufficient
+      // permissions" mesmo quando o resultado seria vazio ou legítimo.
+      // Descoberto e corrigido ao testar o primeiro paciente fictício
+      // (25/09/2026).
+      allow read, update, delete: if isProfissional() &&
+        resource.data.criado_por_id == request.auth.token.profissional_id;
 
       // Criação: qualquer profissional pode criar um paciente novo, desde
       // que se registe a si próprio como criado_por_id (nunca em nome de
