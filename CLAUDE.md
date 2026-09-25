@@ -59,10 +59,26 @@ deve estar pronto" ou de repetir trabalho já feito.
   a usar-se `scripts/criar-conta.js`, tal como já estava documentado.
 
 **Pendente antes do primeiro paciente FICTÍCIO — bloco técnico:**
-- Ativar Firebase Storage (requer plano Blaze) para os documentos
-  RGPD/termo de responsabilidade digitalizados — por agora
-  `firestore-real.js` só grava o metadado do documento (`documentos`),
-  sem `storage_path` real, porque o Storage ainda não está ativo.
+- ~~Ativar Firebase Storage~~ — **feito em 25/09/2026.** Projeto subido
+  a Blaze, bucket criado em `EUR4` (multi-região europeia, alinhado com
+  o requisito GDPR-first da Firestore em `eur3`), `backend/storage.rules`
+  escrito e implantado (`firebase deploy --only storage`) — mesmo
+  princípio de negação por defeito das Firestore Rules, com
+  `firestore.get()` cross-service para confirmar que o profissional é o
+  criador do paciente. `docs/js/firestore-real.js` (`adicionarDocumento`)
+  já envia o ficheiro real para
+  `documentos/{pacienteId}/{docId}_{nomeFicheiro}` e grava o
+  `storage_path` verdadeiro; `nivel1-form.js` tem `<input type="file">`
+  real (já não é só um campo de texto com o nome) e um botão "Ver" que
+  pede um URL de download temporário (`obterUrlDocumento`).
+  **Lacuna conhecida, não é bug:** o ecrã de break-glass (papel
+  utilizador, `resultado-nivel1.js`) ainda não mostra estes documentos
+  — o Worker não devolve `documentos` na resposta de Nível 1, e mesmo
+  que devolvesse, as `storage.rules` atuais só autorizam
+  superadmin/profissional-criador, nunca o papel utilizador. Decidir
+  antes de expor isto no break-glass: ou o Worker passa a servir o URL
+  via service account (fora destas regras, à semelhança de
+  `dados_nivel1`), ou fica deliberadamente fora do ecrã de emergência.
 - Configurar Resend (conta + domínio verificado + secret
   `RESEND_API_KEY` + `RESEND_FROM_EMAIL` em `wrangler.toml`) para a
   notificação obrigatória de acesso — sem isto o Worker funciona

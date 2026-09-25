@@ -1,0 +1,61 @@
+/**
+ * storage.rules — SAVI (Sistema de Acesso Virtual a Informação Clínica)
+ * Firebase Storage: guarda os ficheiros digitalizados do consentimento
+ * RGPD e do termo de responsabilidade, assinados em papel pela família
+ * (CLAUDE.md, "Pivô para produção") — o metadado correspondente vive na
+ * coleção `documentos` do Firestore (backend/firestore.rules).
+ *
+ * Convenção de caminho (ver docs/js/firestore-real.js,
+ * adicionarDocumento): documentos/{pacienteId}/{docId}_{nomeFicheiro}
+ * — o pacienteId no caminho é o que permite a estas regras verificar a
+ * posse sem precisar de conhecer o docId.
+ *
+ * Mesmo princípio de "negar tudo por defeito" das Firestore Rules. O
+ * papel 'utilizador' (break-glass) NUNCA acede a isto diretamente — o
+ * Cloudflare Worker usa a service account, fora do alcance destas
+ * regras, tal como já acontece com o Firestore.
+ */
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function autenticado() {
+      return request.auth != null;
+    }
+
+    function papeis() {
+      return request.auth.token.papeis;
+    }
+
+    function temPapel(p) {
+      return autenticado() && (p in papeis());
+    }
+
+    function isProfissional() {
+      return temPapel('profissional');
+    }
+
+    function isSuperadmin() {
+      return temPapel('superadmin');
+    }
+
+    // Cross-service: lê o Firestore do mesmo projeto para confirmar que
+    // este profissional foi quem criou o paciente — mesma lógica de
+    // ehCriadorDoPaciente em backend/firestore.rules, duplicada aqui
+    // porque Storage Rules não pode importar funções do outro ficheiro.
+    function ehCriadorDoPaciente(pacienteId) {
+      return isProfissional() &&
+        firestore.get(/databases/(default)/documents/pacientes/$(pacienteId)).data.criado_por_id == request.auth.token.profissional_id;
+    }
+
+    match /documentos/{pacienteId}/{nomeFicheiro} {
+      allow read, write: if isSuperadmin() || ehCriadorDoPaciente(pacienteId);
+    }
+
+    // Negação por defeito: qualquer outro caminho fica bloqueado.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

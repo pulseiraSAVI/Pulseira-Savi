@@ -158,28 +158,48 @@
       });
     },
 
-    // ---------- Documentos (metadados — o ficheiro em si depende do
-    // Storage, ainda por ativar, ver CLAUDE.md roadmap) ----------
+    // ---------- Documentos (metadado no Firestore + ficheiro real no
+    // Firebase Storage, ativado em 25/09/2026 — ver CLAUDE.md roadmap) ----------
     listDocumentosDoPaciente: async function (pacienteId) {
       var s = sdk();
       var q = s.query(s.collection(s.db, "documentos"), s.where("paciente_id", "==", pacienteId));
       var snap = await s.getDocs(q);
       return converterQuery(snap);
     },
-    adicionarDocumento: async function (pacienteId, camposDoc, autorId) {
+    // `arquivo` é opcional (File do input, pode ser undefined em chamadas
+    // antigas/testes) — quando presente, é enviado para
+    // documentos/{pacienteId}/{docId}_{nomeFicheiro} no Storage ANTES de
+    // escrever o metadado, para o storage_path já vir preenchido com o
+    // caminho real (nunca null quando há ficheiro). O docId é gerado com
+    // s.doc() antes do setDoc precisamente para poder usá-lo já no
+    // caminho do Storage.
+    adicionarDocumento: async function (pacienteId, camposDoc, autorId, arquivo) {
       var s = sdk();
-      var ref = await s.addDoc(s.collection(s.db, "documentos"), {
+      var novoRef = s.doc(s.collection(s.db, "documentos"));
+      var nomeFicheiro = camposDoc.nome_ficheiro || (arquivo ? arquivo.name : "documento.pdf");
+      var storagePath = null;
+      if (arquivo) {
+        storagePath = "documentos/" + pacienteId + "/" + novoRef.id + "_" + nomeFicheiro;
+        var ref = s.storageRef(s.storage, storagePath);
+        await s.uploadBytes(ref, arquivo);
+      }
+      await s.setDoc(novoRef, {
         paciente_id: pacienteId,
         tipo: camposDoc.tipo || "outro",
-        nome_ficheiro: camposDoc.nome_ficheiro || "documento.pdf",
-        // TODO: caminho real só depois de o Storage estar ativo (tarefa
-        // "Activar Firebase Storage y configurar Resend"). Por agora
-        // guarda-se só o metadado, sem ficheiro associado.
-        storage_path: null,
+        nome_ficheiro: nomeFicheiro,
+        storage_path: storagePath,
         enviado_por_id: autorId || null,
         enviado_em: nowISO()
       });
-      return { id: ref.id };
+      return { id: novoRef.id, storage_path: storagePath };
+    },
+    // Devolve um URL de download temporário (assinado pelo Firebase) para
+    // o ficheiro de um documento — nunca guardado em lado nenhum, pedido
+    // sempre que o profissional/superadmin quer ver o ficheiro.
+    obterUrlDocumento: async function (storagePath) {
+      if (!storagePath) return null;
+      var s = sdk();
+      return await s.getDownloadURL(s.storageRef(s.storage, storagePath));
     },
 
     // ---------- Pulseiras ----------

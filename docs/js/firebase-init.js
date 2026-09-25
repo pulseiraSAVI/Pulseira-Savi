@@ -47,6 +47,13 @@ import {
   serverTimestamp,
   Timestamp
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDG5sHLyGKU7Y-iNPvEzH0t20yqIMA0BRU",
@@ -60,6 +67,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 // Os scripts do resto da app (auth-real.js, etc.) continuam a ser
 // scripts normais, não módulos — ver a nota em index.html sobre a ordem
@@ -68,6 +76,7 @@ const db = getFirestore(app);
 window.firebaseSDK = {
   auth,
   db,
+  storage,
   signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut,
@@ -83,7 +92,11 @@ window.firebaseSDK = {
   where,
   orderBy,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
 };
 
 // auth-real.js espera por este evento antes de usar window.firebaseSDK,

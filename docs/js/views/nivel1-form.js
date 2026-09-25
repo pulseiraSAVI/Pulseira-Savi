@@ -187,6 +187,7 @@ function viewNivel1Form(root, pacienteId, contexto) {
       renderFormDoc();
     });
     renderFormDoc();
+    ligarBotoesVerDoc();
   }
 
   function renderFormDoc() {
@@ -196,17 +197,27 @@ function viewNivel1Form(root, pacienteId, contexto) {
     el.innerHTML =
       '<div class="card" style="margin-top:10px;">' +
       selectField("fd-tipo", "Tipo de documento", "rgpd", [["rgpd", "Consentimento RGPD"], ["termo_responsabilidade", "Termo de responsabilidade"], ["outro", "Outro"]]) +
-      '<label>Nome do ficheiro</label><input type="text" id="fd-nome" placeholder="Ex.: rgpd_assinado.pdf">' +
-      '<p class="field-hint">Só o metadado é guardado por agora — o Storage para o ficheiro em si ainda não está ativo (ver CLAUDE.md, roadmap).</p>' +
-      '<button class="btn btn-primary btn-sm" id="fd-submeter" style="margin-top:8px;">Adicionar à lista</button>' +
+      '<label>Ficheiro digitalizado</label><input type="file" id="fd-ficheiro" accept="application/pdf,image/*">' +
+      '<p class="field-hint">PDF ou imagem da digitalização assinada em papel pela família (consentimento RGPD / termo de responsabilidade) — guardado no Firebase Storage, ligado a este paciente.</p>' +
+      '<button class="btn btn-primary btn-sm" id="fd-submeter" style="margin-top:8px;">Anexar</button>' +
       "</div>";
     document.getElementById("fd-submeter").addEventListener("click", async function () {
-      var nome = document.getElementById("fd-nome").value.trim();
-      if (!nome) { alert("Indique o nome do ficheiro."); return; }
-      await mockdb.adicionarDocumento(pacienteId, { tipo: document.getElementById("fd-tipo").value, nome_ficheiro: nome }, sessao.userId);
-      mostrarFormDoc = false;
-      SAVI_toast("Documento adicionado.");
-      render();
+      var input = document.getElementById("fd-ficheiro");
+      var arquivo = input.files && input.files[0];
+      if (!arquivo) { alert("Escolha um ficheiro para anexar."); return; }
+      var botao = document.getElementById("fd-submeter");
+      botao.disabled = true;
+      botao.textContent = "A enviar…";
+      try {
+        await mockdb.adicionarDocumento(pacienteId, { tipo: document.getElementById("fd-tipo").value, nome_ficheiro: arquivo.name }, sessao.userId, arquivo);
+        mostrarFormDoc = false;
+        SAVI_toast("Documento anexado.");
+        render();
+      } catch (e) {
+        botao.disabled = false;
+        botao.textContent = "Anexar";
+        alert("Não foi possível enviar o ficheiro: " + e.message);
+      }
     });
   }
 
@@ -216,8 +227,28 @@ function viewNivel1Form(root, pacienteId, contexto) {
       var icone = d.tipo === "rgpd" ? "🛡️" : (d.tipo === "termo_responsabilidade" ? "📄" : "📎");
       var rotulo = d.tipo === "rgpd" ? "Consentimento RGPD" : (d.tipo === "termo_responsabilidade" ? "Termo de responsabilidade" : "Documento");
       var data = d.enviado_em ? new Date(d.enviado_em).toLocaleDateString("pt-PT") : "—";
-      return '<div class="doc-item"><span class="doc-icon">' + icone + '</span><div class="doc-info"><div class="doc-nome">' + d.nome_ficheiro + '</div><div class="doc-meta">' + rotulo + " · " + data + "</div></div></div>";
+      var verBotao = d.storage_path
+        ? '<button class="link-discreto btn-ver-doc" data-storage-path="' + escapeAttr(d.storage_path) + '" style="margin-left:8px;">Ver</button>'
+        : "";
+      return '<div class="doc-item"><span class="doc-icon">' + icone + '</span><div class="doc-info"><div class="doc-nome">' + d.nome_ficheiro + '</div><div class="doc-meta">' + rotulo + " · " + data + "</div></div>" + verBotao + "</div>";
     }).join("");
+  }
+
+  function ligarBotoesVerDoc() {
+    document.querySelectorAll(".btn-ver-doc").forEach(function (botao) {
+      botao.addEventListener("click", async function () {
+        var caminho = botao.getAttribute("data-storage-path");
+        botao.disabled = true;
+        try {
+          var url = await mockdb.obterUrlDocumento(caminho);
+          if (url) window.open(url, "_blank", "noopener");
+        } catch (e) {
+          alert("Não foi possível abrir o ficheiro: " + e.message);
+        } finally {
+          botao.disabled = false;
+        }
+      });
+    });
   }
 
   function selectField(id, label, valor, opcoes) {
