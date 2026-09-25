@@ -1,0 +1,13 @@
+{
+  "name": "savi-scripts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scripts administrativos do SAVI que correm fora do Worker (Node.js, com a service account).",
+  "type": "commonjs",
+  "scripts": {
+    "criar-conta": "node criar-conta.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

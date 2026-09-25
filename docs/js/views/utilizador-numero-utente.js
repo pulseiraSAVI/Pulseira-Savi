@@ -32,13 +32,13 @@ function viewUtilizadorNumeroUtente(root) {
     SAVI_router.navegar("#/utilizador/metodo");
   });
 
-  function executar() {
+  async function executar() {
     var msgEl = document.getElementById("erro-msg");
     msgEl.textContent = "";
     var numero = document.getElementById("in-numero").value.trim();
     if (!numero) { msgEl.textContent = "Introduza o número de utente."; return; }
     try {
-      var resultado = workerSim.acessoPorNumeroUtente({ numeroUtente: numero, servico: sessao.servico || "Urgência" });
+      var resultado = await workerSim.acessoPorNumeroUtente({ numeroUtente: numero, servico: sessao.servico || "Urgência" });
       window.SAVI_ultimoAcesso = resultado;
       SAVI_router.navegar("#/nivel1/resultado");
     } catch (e) {

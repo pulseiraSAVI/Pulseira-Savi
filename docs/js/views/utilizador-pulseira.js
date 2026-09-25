@@ -1,29 +1,27 @@
 /* views/utilizador-pulseira.js
- * Método 1 de acesso: leitura de pulseira (NFC ou QR). Sem hardware real
- * nesta simulação — lista de tokens de demonstração. Chama sempre
- * workerSim.acessoPorPulseira() — nunca acede ao mockdb diretamente.
+ * Método 1 de acesso: leitura de pulseira (NFC ou QR). Sem hardware NFC
+ * real nesta app web (Web NFC API só existe na ferramenta interna de
+ * gravação, não aqui) — por agora o token lido é introduzido
+ * manualmente. Chama sempre workerSim.acessoPorPulseira() — nunca acede
+ * ao mockdb/Firestore diretamente, tal como o break-glass exige
+ * (CLAUDE.md): o papel 'utilizador' não tem permissão de leitura direta
+ * sobre a coleção `pulseiras`, só o Worker tem.
  */
 function viewUtilizadorPulseira(root) {
   "use strict";
 
   var sessao = authSim.getSessao();
-  var tokensDemo = mockdb.listPulseiras().map(function (p) {
-    var paciente = p.paciente_id ? mockdb.getPaciente(p.paciente_id) : null;
-    return {
-      token: p.token,
-      label: (paciente ? paciente.nome : "(sem paciente)") + " — " + p.estado
-    };
-  });
 
   function renderErroInline(mensagem) {
     var el = document.getElementById("scan-erro");
     if (el) el.textContent = mensagem;
   }
 
-  function executarAcesso(token) {
+  async function executarAcesso(token) {
     renderErroInline("");
+    if (!token) { renderErroInline("Introduza ou leia o token da pulseira."); return; }
     try {
-      var resultado = workerSim.acessoPorPulseira({ token: token, servico: sessao.servico || "Urgência" });
+      var resultado = await workerSim.acessoPorPulseira({ token: token, servico: sessao.servico || "Urgência" });
       window.SAVI_ultimoAcesso = resultado;
       SAVI_router.navegar("#/nivel1/resultado");
     } catch (e) {
@@ -46,25 +44,20 @@ function viewUtilizadorPulseira(root) {
     '<div class="scan-center">' +
     '<div class="scan-circle">📶</div>' +
     '<div id="scan-erro" style="color:var(--alert);font-size:12.5px;"></div>' +
-    '<button class="btn btn-primary btn-block" id="btn-simular">Simular leitura NFC/QR</button>' +
-    '<div class="demo-token-list"><div class="section-title" style="margin-top:14px;">Ou escolha um token de demonstração</div><div id="lista-tokens"></div></div>' +
+    '<label style="margin-top:14px;">Token da pulseira (NFC/QR)</label>' +
+    '<input type="text" id="in-token" placeholder="Ex.: SAVI-XXXXXX-001">' +
+    '<button class="btn btn-primary btn-block" id="btn-ler" style="margin-top:10px;">Ler pulseira</button>' +
     "</div>" +
     '<div style="text-align:center;padding-bottom:10px;">' +
     '<button class="link-discreto" id="btn-voltar">← Escolher outro método</button>' +
     "</div>" +
     "</div></div></div>";
 
-  var listaEl = document.getElementById("lista-tokens");
-  tokensDemo.forEach(function (t) {
-    var btn = document.createElement("button");
-    btn.textContent = t.token + "  —  " + t.label;
-    btn.addEventListener("click", function () { executarAcesso(t.token); });
-    listaEl.appendChild(btn);
+  document.getElementById("btn-ler").addEventListener("click", function () {
+    executarAcesso(document.getElementById("in-token").value.trim());
   });
-
-  document.getElementById("btn-simular").addEventListener("click", function () {
-    var ativo = tokensDemo.find(function (t) { return t.label.indexOf("ativa") !== -1; });
-    executarAcesso(ativo ? ativo.token : (tokensDemo[0] ? tokensDemo[0].token : "TOKEN-INEXISTENTE"));
+  document.getElementById("in-token").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") executarAcesso(document.getElementById("in-token").value.trim());
   });
 
   document.getElementById("btn-voltar").addEventListener("click", function () {

@@ -28,12 +28,12 @@ function viewEscolhaPapel(root) {
     "</button>" +
     "</div></div></div></div>";
 
-  document.getElementById("btn-profissional").addEventListener("click", function () {
-    authSim.escolherPapel("profissional");
+  document.getElementById("btn-profissional").addEventListener("click", async function () {
+    await authSim.escolherPapel("profissional");
     SAVI_router.navegar("#/profissional/pacientes");
   });
-  document.getElementById("btn-utilizador").addEventListener("click", function () {
-    authSim.escolherPapel("utilizador");
+  document.getElementById("btn-utilizador").addEventListener("click", async function () {
+    await authSim.escolherPapel("utilizador");
     SAVI_router.navegar("#/utilizador/metodo");
   });
 }

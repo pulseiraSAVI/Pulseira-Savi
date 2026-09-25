@@ -9,10 +9,12 @@ function viewAdminTokens(root) {
   var mostrarForm = false;
   var filtroEstado = "todos";
 
-  function render() {
-    var pulseiras = mockdb.listPulseiras();
-    var lotes = mockdb.listLotes();
-    var pacientes = mockdb.listPacientes();
+  async function render() {
+    root.innerHTML = adminNav(sessao, "tokens") + '<div class="page"><p class="subtitle">A carregar…</p></div>';
+
+    var pulseiras = await mockdb.listPulseiras();
+    var lotes = await mockdb.listLotes();
+    var pacientes = await mockdb.listPacientes();
 
     var visiveis = filtroEstado === "todos" ? pulseiras : pulseiras.filter(function (p) { return p.estado === filtroEstado; });
 
@@ -52,9 +54,12 @@ function viewAdminTokens(root) {
       tbodyLotes.appendChild(tr);
     });
 
+    var pacientesPorId = {};
+    pacientes.forEach(function (p) { pacientesPorId[p.id] = p; });
+
     var tbodyPulseiras = document.getElementById("tbody-pulseiras");
     visiveis.forEach(function (p) {
-      var paciente = p.paciente_id ? mockdb.getPaciente(p.paciente_id) : null;
+      var paciente = p.paciente_id ? pacientesPorId[p.paciente_id] : null;
       var tr = document.createElement("tr");
       tr.innerHTML =
         "<td>" + p.token + "</td>" +
@@ -77,9 +82,9 @@ function viewAdminTokens(root) {
           opt.textContent = pac.nome;
           select.appendChild(opt);
         });
-        select.addEventListener("change", function () {
+        select.addEventListener("change", async function () {
           if (!select.value) return;
-          mockdb.atribuirPulseira(p.id, select.value);
+          await mockdb.atribuirPulseira(p.id, select.value);
           SAVI_toast("Pulseira atribuída.");
           render();
         });
@@ -88,10 +93,10 @@ function viewAdminTokens(root) {
         var btnDesativar = document.createElement("button");
         btnDesativar.className = "btn btn-danger btn-sm";
         btnDesativar.textContent = "Desativar";
-        btnDesativar.addEventListener("click", function () {
+        btnDesativar.addEventListener("click", async function () {
           var motivo = prompt("Motivo da desativação:");
           if (motivo === null) return;
-          mockdb.desativarPulseira(p.id, motivo, "equipa");
+          await mockdb.desativarPulseira(p.id, motivo);
           render();
         });
         tdAcao.appendChild(btnDesativar);
@@ -119,8 +124,8 @@ function viewAdminTokens(root) {
       '<button class="btn btn-primary" id="f-submeter" style="margin-top:12px;">Gerar lote</button>' +
       "</div>";
 
-    document.getElementById("f-submeter").addEventListener("click", function () {
-      mockdb.gerarLote({
+    document.getElementById("f-submeter").addEventListener("click", async function () {
+      await mockdb.gerarLote({
         fornecedor: document.getElementById("f-fornecedor").value,
         tipo_pulseira: document.getElementById("f-tipo").value,
         chip_modelo: document.getElementById("f-chip").value,

@@ -2,7 +2,7 @@
  * Gestão de pacientes — partilhada entre a vista de profissional (só os
  * pacientes que criou) e a vista de superadmin (vê todos). O criador do
  * paciente é sempre quem está autenticado nesta sessão (nunca escolhido
- * manualmente), tal como o Worker/Firestore Rules reais exigiriam.
+ * manualmente), tal como o Worker/Firestore Rules reais exigem.
  *
  * @param {string} contexto 'profissional' | 'admin'
  */
@@ -13,10 +13,23 @@ function viewPacientesLista(root, contexto) {
   var mostrarForm = false;
   var ehAdmin = contexto === "admin";
 
-  function render() {
-    var pacientes = ehAdmin ? mockdb.listPacientes() : mockdb.listPacientesDoProfissional(sessao.userId);
+  async function render() {
+    root.innerHTML = '<div class="page"><p class="subtitle">A carregar…</p></div>';
+
+    var pacientes = ehAdmin ? await mockdb.listPacientes() : await mockdb.listPacientesDoProfissional(sessao.userId);
     var nav = ehAdmin ? adminNav(sessao, "pacientes") : profissionalNav(sessao, "pacientes");
     var hashEditar = ehAdmin ? "#/admin/nivel1/" : "#/profissional/nivel1/";
+
+    // Pré-carrega dados_nivel1 (e, em modo admin, o profissional criador)
+    // de todos os pacientes visíveis antes de desenhar a tabela.
+    var dadosPorPaciente = {};
+    var criadoresPorId = {};
+    await Promise.all(pacientes.map(async function (p) {
+      dadosPorPaciente[p.id] = (await mockdb.getDadosNivel1(p.id)) || {};
+      if (ehAdmin && !criadoresPorId[p.criado_por_id]) {
+        criadoresPorId[p.criado_por_id] = await mockdb.getProfissional(p.criado_por_id);
+      }
+    }));
 
     root.innerHTML = nav +
       '<div class="page">' +
@@ -41,8 +54,8 @@ function viewPacientesLista(root, contexto) {
       tbody.appendChild(trVazio);
     }
     pacientes.forEach(function (p) {
-      var d = mockdb.getDadosNivel1(p.id) || {};
-      var criador = ehAdmin ? mockdb.getProfissional(p.criado_por_id) : null;
+      var d = dadosPorPaciente[p.id] || {};
+      var criador = ehAdmin ? criadoresPorId[p.criado_por_id] : null;
       var tr = document.createElement("tr");
       tr.innerHTML =
         "<td>" + p.nome + "</td>" +
@@ -89,11 +102,11 @@ function viewPacientesLista(root, contexto) {
       '<button class="btn btn-primary" id="f-submeter" style="margin-top:12px;">Registar</button>' +
       "</div>";
 
-    document.getElementById("f-submeter").addEventListener("click", function () {
+    document.getElementById("f-submeter").addEventListener("click", async function () {
       var nome = document.getElementById("f-nome").value.trim();
       var nascimento = document.getElementById("f-nascimento").value;
       if (!nome || !nascimento) { alert("Preencha nome e data de nascimento."); return; }
-      mockdb.criarPaciente({
+      await mockdb.criarPaciente({
         nome: nome,
         data_nascimento: nascimento,
         sexo: document.getElementById("f-sexo").value,

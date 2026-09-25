@@ -1,23 +1,33 @@
 /* views/admin-auditoria.js
  * Secção Segurança/Auditoria — só visível para quem tem funcao_auditor=true
- * (aplicado também na guarda de rota em router.js). Lista a tabela
- * `acessos`, agora cobrindo os 3 métodos de acesso (pulseira/número de
+ * (aplicado também na guarda de rota em router.js, e nas Firestore Rules:
+ * a coleção `acessos` só é legível por auditor/superadmin). Lista a
+ * tabela `acessos`, cobrindo os 3 métodos de acesso (pulseira/número de
  * utente/identidade) — não só pulseira.
  */
-function viewAdminAuditoria(root) {
+async function viewAdminAuditoria(root) {
   "use strict";
 
   var sessao = authSim.getSessao();
-  var acessos = mockdb.listAcessos();
-  var pulseiras = mockdb.listPulseiras();
-  var profissionais = mockdb.listProfissionais();
+  root.innerHTML = adminNav(sessao, "auditoria") + '<div class="page"><p class="subtitle">A carregar…</p></div>';
+
+  var acessos = await mockdb.listAcessos();
+  var pulseiras = await mockdb.listPulseiras();
+  var profissionais = await mockdb.listProfissionais();
+
+  var pacientesPorId = {};
+  await Promise.all(acessos.map(async function (a) {
+    if (a.paciente_id && !pacientesPorId[a.paciente_id]) {
+      try { pacientesPorId[a.paciente_id] = await mockdb.getPaciente(a.paciente_id); } catch (e) { pacientesPorId[a.paciente_id] = null; }
+    }
+  }));
 
   function nomeUtilizador(id) {
     var p = profissionais.find(function (x) { return x.id === id; });
     return p ? p.nome : "—";
   }
   function nomePaciente(id) {
-    var p = id ? mockdb.getPaciente(id) : null;
+    var p = id ? pacientesPorId[id] : null;
     return p ? p.nome : "—";
   }
   function tokenPulseira(id) {

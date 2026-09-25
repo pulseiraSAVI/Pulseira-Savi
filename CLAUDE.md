@@ -20,6 +20,73 @@ urgência.
 > Projeto §11-12. Não assumir que "está pronto para pacientes reais"
 > apenas porque a infraestrutura funciona.
 
+## Roadmap para o primeiro paciente real (revisão de 25/09/2026)
+
+Esta secção é a fonte da verdade sobre o que já está feito de verdade (não
+simulado) e o que falta — consultar aqui antes de assumir que algo "já
+deve estar pronto" ou de repetir trabalho já feito.
+
+**Infraestrutura real — já implantada, não é mais scaffolding:**
+- Projeto Firebase `pulseira-savi` criado; Firestore na multi-região
+  europeia `eur3` (cumpre o requisito GDPR-first de dados na UE — ver
+  "Stack técnico decidido"; não é literalmente a região `europe-west1`,
+  é a multi-região que a inclui).
+- Firestore Security Rules reais implantadas (`backend/firestore.rules`,
+  via `firebase deploy --only firestore:rules`).
+- Firebase Authentication (Correio eletrónico/palavra-passe) ativado.
+- Primeira conta superadmin real criada via `scripts/criar-conta.js`
+  (nº de Ordem `ADMIN01`) — este script é também o caminho para criar
+  qualquer conta futura enquanto não existir UI de gestão de contas.
+- Cloudflare Worker `savi-worker` com a lógica real de break-glass,
+  autorização e audit log implantado em
+  `https://savi-worker.pulseira-savi.workers.dev` (secret
+  `FIREBASE_SERVICE_ACCOUNT_KEY` configurado).
+- Repositório GitHub ao dia; GitHub Pages a servir `docs/`.
+- `docs/` já ligado à infraestrutura real, de ponta a ponta: `index.html`
+  carrega `firebase-init.js` como módulo; `docs/js/mockdb.js` ficou
+  reduzido às funções puras (idade, superfície corporal); todas as
+  leituras/escritas de dados passaram para `docs/js/firestore-real.js`
+  (Firestore real, acrescentado ao mesmo `window.mockdb`);
+  `docs/js/auth-real.js` substitui `auth-sim.js` (Firebase Auth real +
+  PIN); `docs/js/worker-real.js` substitui `worker-sim.js` (chamadas
+  reais ao Worker já implantado, para os 3 métodos de break-glass). A
+  partir de agora a app **não abre por `file://`** — testar sempre por
+  http(s) (`cd docs && python3 -m http.server 8000`, ou já publicado no
+  GitHub Pages).
+- Criar/editar (papéis, PIN, nome) e eliminar contas continuam **fora**
+  do cliente, de propósito — exigem Admin SDK (custom claims). A vista
+  de superadmin "Contas" só lista e ativa/desativa; para o resto continua
+  a usar-se `scripts/criar-conta.js`, tal como já estava documentado.
+
+**Pendente antes do primeiro paciente FICTÍCIO — bloco técnico:**
+- Ativar Firebase Storage (requer plano Blaze) para os documentos
+  RGPD/termo de responsabilidade digitalizados — por agora
+  `firestore-real.js` só grava o metadado do documento (`documentos`),
+  sem `storage_path` real, porque o Storage ainda não está ativo.
+- Configurar Resend (conta + domínio verificado + secret
+  `RESEND_API_KEY` + `RESEND_FROM_EMAIL` em `wrangler.toml`) para a
+  notificação obrigatória de acesso — sem isto o Worker funciona
+  normalmente, só não notifica.
+- Testar de ponta a ponta com um paciente fictício por http(s): criar
+  conta de profissional via `scripts/criar-conta.js`, identificar-se,
+  registar paciente, escrever `dados_nivel1`, solicitar pulseira, e
+  validar os 3 métodos de break-glass a partir do papel utilizador.
+- Reverificar se o `workers.dev` do Worker já resolve TLS sem falhas
+  (houve um handshake a falhar logo após o registo do subdomínio,
+  provavelmente só propagação DNS/edge — nunca confirmado como resolvido).
+
+**Pendente antes do primeiro paciente REAL — bloco legal/organizativo
+(NÃO se resolve com código, ver aviso logo no início deste documento):**
+- EIPD/DPIA formal.
+- DPAs com os subprocessadores (Google/Firebase, Cloudflare, Resend).
+- Validação formal do DPO/CNPD.
+- Confirmação final de quem é o responsável pelo tratamento de dados
+  (decisão provisória: o hospital — ver "Decisões resolvidas" #7).
+
+Os dois blocos pendentes correm em paralelo, mas **nenhum paciente real
+entra no sistema até os dois estarem fechados** — mesmo com a
+infraestrutura 100% funcional e testada com pacientes fictícios.
+
 ## Fase ativa: SOMENTE Fase 1 (piloto). Não construir além disto.
 
 - População-alvo: 50 pacientes crónicos de alto risco (25 pediátricos — 10

@@ -23,13 +23,6 @@ function viewIdentificacao(root) {
       '<label>PIN (5 caracteres)</label>' +
       '<input type="text" id="in-pin" class="pin-input" placeholder="•••••" maxlength="5" autocomplete="current-password">' +
       '<button class="btn btn-primary btn-block" id="btn-entrar" style="margin-top:18px;">Entrar</button>' +
-      '<p style="font-size:11px;color:var(--ink-soft);margin-top:14px;line-height:1.6;">' +
-      "Demo — profissional + utilizador: nº Ordem <b>12345M</b> / PIN <b>A1B2C</b> (Dr.ª Ana Silva).<br>" +
-      "Só profissional: <b>54321C</b> / <b>T4G05</b> (Dr. Tiago Mendes).<br>" +
-      "Só utilizador (break-glass): <b>99887E</b> / <b>M3D1C</b> (Enf.º Marco Pinto).<br>" +
-      "Superadmin + auditor: <b>ADMIN01</b> / <b>9XZQ7</b> (Rui Ferreira).<br>" +
-      "Superadmin: <b>ADMIN02</b> / <b>7YTR2</b> (Carla Nunes)." +
-      "</p>" +
       "</div></div></div></div>";
 
     document.getElementById("btn-entrar").addEventListener("click", aoSubmeter);

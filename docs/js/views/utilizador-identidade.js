@@ -38,7 +38,7 @@ function viewUtilizadorIdentidade(root) {
     SAVI_router.navegar("#/utilizador/metodo");
   });
 
-  function executar() {
+  async function executar() {
     var msgEl = document.getElementById("erro-msg");
     msgEl.textContent = "";
     var nome = document.getElementById("in-nome").value.trim();
@@ -50,7 +50,7 @@ function viewUtilizadorIdentidade(root) {
     if (!motivo) { msgEl.textContent = "O motivo é obrigatório neste método de acesso."; return; }
 
     try {
-      var resultado = workerSim.acessoPorIdentidade({
+      var resultado = await workerSim.acessoPorIdentidade({
         nomeCompleto: nome, dataNascimento: nascimento, sexo: sexo, motivo: motivo,
         servico: sessao.servico || "Urgência"
       });

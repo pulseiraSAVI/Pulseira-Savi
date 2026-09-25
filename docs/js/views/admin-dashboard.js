@@ -1,21 +1,28 @@
 /* views/admin-dashboard.js — dashboard com contadores da vista de
  * superadmin. Não existe uma quarta vista "painel de controlo" — é
  * exatamente este conteúdo. Usa adminNav/statCard de nav-helpers.js. */
-function viewAdminDashboard(root) {
+async function viewAdminDashboard(root) {
   "use strict";
 
   var sessao = authSim.getSessao();
-  var pacientes = mockdb.listPacientes();
-  var pulseiras = mockdb.listPulseiras();
-  var profissionais = mockdb.listProfissionais();
-  var acessos = mockdb.listAcessos();
+  root.innerHTML = adminNav(sessao, "dashboard") + '<div class="page"><p class="subtitle">A carregar…</p></div>';
+
+  var pacientes = await mockdb.listPacientes();
+  var pulseiras = await mockdb.listPulseiras();
+  var profissionais = await mockdb.listProfissionais();
+  var acessos = await mockdb.listAcessos();
+
+  var dadosPorPaciente = {};
+  await Promise.all(pacientes.map(async function (p) {
+    dadosPorPaciente[p.id] = await mockdb.getDadosNivel1(p.id);
+  }));
 
   var pulseirasAtivas = pulseiras.filter(function (p) { return p.estado === "ativa"; }).length;
   var pulseirasNaoAtribuidas = pulseiras.filter(function (p) { return p.estado === "nao_atribuida"; }).length;
   var pulseirasProblema = pulseiras.filter(function (p) { return p.estado === "perdida" || p.estado === "desativada" || p.estado === "substituida"; }).length;
   var consentimentosPendentes = pacientes.filter(function (p) { return p.estado_consentimento === "pendente"; }).length;
   var naoVerificados = pacientes.filter(function (p) {
-    var d = mockdb.getDadosNivel1(p.id);
+    var d = dadosPorPaciente[p.id];
     return d && d.estado_verificacao === "nao_verificado";
   }).length;
   var acessosHoje = acessos.filter(function (a) {

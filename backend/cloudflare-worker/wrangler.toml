@@ -16,10 +16,17 @@ compatibility_date = "2026-08-08"
 
 [vars]
 # Variáveis não-sensíveis (texto simples, versionável).
-# ID do projeto Firebase (europe-west) usado para validar o `aud`/`iss`
-# do ID token do Firebase Auth e para construir os pedidos REST ao
-# Firestore. TODO: substituir pelo project ID real antes do deploy.
-FIREBASE_PROJECT_ID = "TODO-substituir-pelo-project-id-real"
+# ID do projeto Firebase usado para validar o `aud`/`iss` do ID token do
+# Firebase Auth e para construir os pedidos REST ao Firestore. Não é
+# segredo (é público, aparece nos URLs da consola) — pode ficar aqui em
+# texto simples.
+FIREBASE_PROJECT_ID = "pulseira-savi"
+
+# Remetente das notificações Resend — tem de ser um endereço num domínio
+# verificado no Resend (Resend > Domains). TODO: preencher quando o
+# domínio de produção estiver decidido e verificado; até lá,
+# notificarTitularResend() regista um aviso e não envia nada.
+RESEND_FROM_EMAIL = "TODO-dominio-verificado-no-resend"
 
 # ---------------------------------------------------------------------
 # Secrets — NUNCA colocar aqui. Configurar com os comandos abaixo antes

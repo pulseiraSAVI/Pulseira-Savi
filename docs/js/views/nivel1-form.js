@@ -12,6 +12,12 @@
  * guardar — ao contrário do ecrã de leitura rápida (resultado-nivel1.js),
  * que usa separadores de footer.
  *
+ * Controlo de acesso: com Firestore real, quem decide se este
+ * profissional pode ver/editar este paciente são as próprias Security
+ * Rules (backend/firestore.rules) — não uma verificação no cliente. Se
+ * mockdb.getPaciente() abaixo for rejeitado (permission-denied), é
+ * porque as regras já negaram o acesso.
+ *
  * @param {string} contexto 'profissional' | 'admin'
  */
 function viewNivel1Form(root, pacienteId, contexto) {
@@ -23,17 +29,22 @@ function viewNivel1Form(root, pacienteId, contexto) {
   var hashVoltar = ehAdmin ? "#/admin/pacientes" : "#/profissional/pacientes";
   var mostrarFormDoc = false;
 
-  function render() {
-    var paciente = mockdb.getPaciente(pacienteId);
-    if (!paciente) { SAVI_router.navegar(hashVoltar); return; }
-    if (!mockdb.podeGerirPaciente(pacienteId, sessao.userId, ehAdmin)) {
+  async function render() {
+    root.innerHTML = '<div class="page"><p class="subtitle">A carregar…</p></div>';
+
+    var paciente;
+    try {
+      paciente = await mockdb.getPaciente(pacienteId);
+    } catch (e) {
       SAVI_router.navegar("#/erro/acesso_negado");
       return;
     }
-    var dados = mockdb.getDadosNivel1(pacienteId) || {};
+    if (!paciente) { SAVI_router.navegar(hashVoltar); return; }
+
+    var dados = (await mockdb.getDadosNivel1(pacienteId)) || {};
     var gestor = paciente.gestor_do_caso || {};
-    var documentos = mockdb.listDocumentosDoPaciente(pacienteId);
-    var pulseiras = mockdb.listPulseiras().filter(function (p) { return p.paciente_id === pacienteId && p.estado === "ativa"; });
+    var documentos = await mockdb.listDocumentosDoPaciente(pacienteId);
+    var pulseiras = (await mockdb.listPulseirasDoPaciente(pacienteId)).filter(function (p) { return p.estado === "ativa"; });
     var nav = ehAdmin ? adminNav(sessao, "pacientes") : profissionalNav(sessao, "pacientes");
 
     root.innerHTML = nav +
@@ -109,9 +120,9 @@ function viewNivel1Form(root, pacienteId, contexto) {
 
     document.getElementById("btn-voltar").addEventListener("click", function () { SAVI_router.navegar(hashVoltar); });
 
-    document.getElementById("btn-guardar").addEventListener("click", function () {
+    document.getElementById("btn-guardar").addEventListener("click", async function () {
       try {
-        mockdb.atualizarPaciente(pacienteId, {
+        await mockdb.atualizarPaciente(pacienteId, {
           nome: document.getElementById("f-nome").value.trim(),
           data_nascimento: document.getElementById("f-nascimento").value,
           sexo: document.getElementById("f-sexo").value,
@@ -128,7 +139,7 @@ function viewNivel1Form(root, pacienteId, contexto) {
             telefone_institucional: document.getElementById("f-gc-telefone").value.trim()
           }
         });
-        mockdb.escreverDadosNivel1(pacienteId, {
+        await mockdb.escreverDadosNivel1(pacienteId, {
           peso_kg: parseFloat(document.getElementById("f-peso").value) || null,
           altura_cm: parseFloat(document.getElementById("f-altura").value) || null,
           biometria_registada_em: document.getElementById("f-biom-data").value || null,
@@ -148,9 +159,9 @@ function viewNivel1Form(root, pacienteId, contexto) {
       }
     });
 
-    document.getElementById("btn-verificar").addEventListener("click", function () {
+    document.getElementById("btn-verificar").addEventListener("click", async function () {
       try {
-        mockdb.verificarDadosNivel1(pacienteId, autor);
+        await mockdb.verificarDadosNivel1(pacienteId, autor);
         SAVI_toast("Registo clínico marcado como verificado.");
         render();
       } catch (e) {
@@ -160,9 +171,9 @@ function viewNivel1Form(root, pacienteId, contexto) {
 
     var btnPulseira = document.getElementById("btn-pulseira");
     if (btnPulseira) {
-      btnPulseira.addEventListener("click", function () {
+      btnPulseira.addEventListener("click", async function () {
         try {
-          var p = mockdb.solicitarPulseiraParaPaciente(pacienteId);
+          var p = await mockdb.solicitarPulseiraParaPaciente(pacienteId);
           SAVI_toast("Pulseira " + p.token + " atribuída a " + paciente.nome + ".");
           render();
         } catch (e) {
@@ -186,13 +197,13 @@ function viewNivel1Form(root, pacienteId, contexto) {
       '<div class="card" style="margin-top:10px;">' +
       selectField("fd-tipo", "Tipo de documento", "rgpd", [["rgpd", "Consentimento RGPD"], ["termo_responsabilidade", "Termo de responsabilidade"], ["outro", "Outro"]]) +
       '<label>Nome do ficheiro</label><input type="text" id="fd-nome" placeholder="Ex.: rgpd_assinado.pdf">' +
-      '<p class="field-hint">Simulação — sem upload real. O ficheiro só é adicionado à lista (guardada nesta simulação em localStorage).</p>' +
+      '<p class="field-hint">Só o metadado é guardado por agora — o Storage para o ficheiro em si ainda não está ativo (ver CLAUDE.md, roadmap).</p>' +
       '<button class="btn btn-primary btn-sm" id="fd-submeter" style="margin-top:8px;">Adicionar à lista</button>' +
       "</div>";
-    document.getElementById("fd-submeter").addEventListener("click", function () {
+    document.getElementById("fd-submeter").addEventListener("click", async function () {
       var nome = document.getElementById("fd-nome").value.trim();
       if (!nome) { alert("Indique o nome do ficheiro."); return; }
-      mockdb.adicionarDocumento(pacienteId, { tipo: document.getElementById("fd-tipo").value, nome_ficheiro: nome }, sessao.userId);
+      await mockdb.adicionarDocumento(pacienteId, { tipo: document.getElementById("fd-tipo").value, nome_ficheiro: nome }, sessao.userId);
       mostrarFormDoc = false;
       SAVI_toast("Documento adicionado.");
       render();

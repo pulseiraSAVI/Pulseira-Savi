@@ -16,22 +16,31 @@
 <div id="app"></div>
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<!-- Scripts normais (sem type="module") para funcionar via file://, sem CORS.
-     Ordem de carregamento importa: hash-util -> mockdb -> worker-sim ->
-     auth-sim -> nav-helpers -> views -> router -> app.
+<!-- Ligação real (pivô de produção, revisão de 19/09/2026): já não corre
+     por file:// — firebase-init.js é um módulo ES (só assim a Firebase
+     JS SDK é distribuída), e os browsers bloqueiam `import` de módulos
+     em file:// por CORS. Testar sempre por http(s): localmente com
+     `cd docs && python3 -m http.server 8000`, ou já publicado no
+     GitHub Pages.
+
+     Ordem de carregamento: hash-util -> firebase-init (módulo, ver nota
+     acima) -> mockdb (só funções puras) -> firestore-real (acrescenta as
+     funções de dados a window.mockdb) -> worker-real -> auth-real ->
+     nav-helpers -> views -> router -> app.
 
      Nota: login-profissional.js, login-familia.js, scan.js,
      familia-pacientes.js, familia-paciente-detalhe.js, admin-pacientes.js,
-     admin-nivel1-form.js e admin-profissionais.js continuam em disco
-     (não foi possível eliminá-los neste ambiente — falha de permissões)
-     mas foram substituídos e NÃO são carregados aqui: não ficam
-     alcançáveis por nenhuma rota da app. A família está suspensa nesta
-     revisão (ver CLAUDE.md, "Pivô para produção") e o Nível 2 foi
-     eliminado por completo. -->
+     admin-nivel1-form.js, admin-profissionais.js, worker-sim.js,
+     auth-sim.js e mockdb-sim.js (se ainda existir) continuam em disco
+     mas NÃO são carregados aqui: não ficam alcançáveis por nenhuma rota
+     da app. A família está suspensa nesta revisão (ver CLAUDE.md, "Pivô
+     para produção") e o Nível 2 foi eliminado por completo. -->
 <script src="js/hash-util.js"></script>
+<script type="module" src="js/firebase-init.js"></script>
 <script src="js/mockdb.js"></script>
-<script src="js/worker-sim.js"></script>
-<script src="js/auth-sim.js"></script>
+<script src="js/firestore-real.js"></script>
+<script src="js/worker-real.js"></script>
+<script src="js/auth-real.js"></script>
 
 <script src="js/views/nav-helpers.js"></script>
 <script src="js/views/identificacao.js"></script>

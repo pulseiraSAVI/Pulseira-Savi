@@ -4,11 +4,18 @@
  * Pivô de produção, revisão de 15/09/2026 — 3 métodos de acesso
  * (pulseira / número de utente / identidade), sem Nível 2 (eliminado).
  *
- * ⚠️ ESTE FICHEIRO É SCAFFOLDING COMENTADO PARA PRODUÇÃO, NÃO CÓDIGO
- * FUNCIONAL SEM CREDENCIAIS REAIS. Não foram inventadas chaves, segredos
- * nem endpoints reais — cada ponto que precisa de configuração real está
- * marcado com TODO. A simulação funcional desta iteração vive em
- * `docs/js/worker-sim.js` (corre inteiramente no browser).
+ * Revisão de 19/09/2026 — saída do scaffolding: a lógica de troca de
+ * token da service account e o envio real ao Resend já estão
+ * implementados. O que falta para isto correr em produção não é mais
+ * código, é configuração:
+ *   wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY   (JSON completo da chave)
+ *   wrangler secret put RESEND_API_KEY
+ * e depois `wrangler deploy`. Nenhuma chave nem segredo foi inventado —
+ * onde falta uma decisão real (domínio verificado no Resend, origem do
+ * email de contacto do paciente) o código fica com um TODO explícito, não
+ * com um valor inventado. A simulação funcional desta iteração continua a
+ * viver em `docs/js/worker-sim.js` (corre inteiramente no browser) até a
+ * tarefa de ligar o frontend real (ver README) estar feita.
  *
  * Responsabilidades deste Worker (nunca do frontend, que nunca fala
  * diretamente com o Firestore para o fluxo de break-glass):
@@ -36,21 +43,19 @@
  *     de Workers (não há Node.js completo disponível).
  */
 
-import { jwtVerify, createRemoteJWKSet } from "jose";
+import { jwtVerify, createRemoteJWKSet, SignJWT, importPKCS8 } from "jose";
 
 // ---------------------------------------------------------------------
 // Configuração
 // ---------------------------------------------------------------------
 
-// TODO: substituir pelo project ID real do projeto Firebase (europe-west),
-// definido como variável de ambiente no wrangler.toml / painel Cloudflare.
-// const FIREBASE_PROJECT_ID = env.FIREBASE_PROJECT_ID;
+// FIREBASE_PROJECT_ID vem de `[vars]` em wrangler.toml (não é segredo, é
+// um identificador público) — lido em cada função como `env.FIREBASE_PROJECT_ID`,
+// nunca hardcoded aqui.
 
 // Chave pública do Firebase Auth para verificação de ID tokens (JWKS).
-// TODO: confirmar o endpoint exato antes do deploy — este é o endpoint
-// documentado pela Google para verificação de ID tokens do Firebase Auth.
-// Não inventar nem assumir sem verificar a documentação oficial no momento
-// da implementação real.
+// Endpoint documentado pela Google para verificação de ID tokens do
+// Firebase Auth (securetoken).
 const FIREBASE_JWKS_URL =
   "https://www.googleapis.com/service_accounts/v1/metadata/x509/securetoken@system.gserviceaccount.com";
 
@@ -182,19 +187,77 @@ async function validarPapelUtilizadorEPin(env, claims, pinRecebido) {
 const FIRESTORE_BASE_URL = (projectId) =>
   `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
 
+// Cache do access token entre invocações no mesmo isolate do Worker —
+// best-effort (não garantido entre pedidos, mas evita assinar um JWT novo
+// e chamar o Google OAuth2 em cada pedido quando o isolate é reutilizado).
+let _accessTokenCache = null;
+
 /**
- * TODO: implementar a obtenção de um access token OAuth2 para a service
- * account do Worker (JWT assinado com a chave privada da service account,
- * trocado no endpoint token do Google OAuth2). Nunca hardcodar a chave
- * privada no código-fonte — deve vir de um secret configurado via
- * `wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY`.
+ * Obtém um access token OAuth2 para a service account do Worker: assina um
+ * JWT com a chave privada da service account e troca-o no endpoint token
+ * do Google OAuth2 (grant_type urn:ietf:params:oauth:grant-type:jwt-bearer).
+ * A chave privada nunca está hardcoded — vem sempre de
+ * `env.FIREBASE_SERVICE_ACCOUNT_KEY`, configurado com
+ * `wrangler secret put FIREBASE_SERVICE_ACCOUNT_KEY` (o JSON completo da
+ * chave da service account, copiado de Firebase Console > Definições do
+ * projeto > Contas de serviço > Gerar nova chave privada).
  */
 async function obterAccessTokenServiceAccount(env) {
-  throw new Error(
-    "TODO: gerar access token OAuth2 a partir do secret FIREBASE_SERVICE_ACCOUNT_KEY " +
-      "(wrangler secret put). Não implementado neste scaffolding — requer " +
-      "credenciais reais do projeto Firebase que não devem ser inventadas."
-  );
+  const agora = Math.floor(Date.now() / 1000);
+  if (_accessTokenCache && _accessTokenCache.expiraEm > agora + 60) {
+    return _accessTokenCache.token;
+  }
+
+  if (!env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+    throw new ErroSAVI(
+      "erro_configuracao",
+      "FIREBASE_SERVICE_ACCOUNT_KEY não está configurado (wrangler secret put).",
+      500
+    );
+  }
+
+  let credenciais;
+  try {
+    credenciais = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_KEY);
+  } catch (e) {
+    throw new ErroSAVI(
+      "erro_configuracao",
+      "FIREBASE_SERVICE_ACCOUNT_KEY não é um JSON válido.",
+      500
+    );
+  }
+
+  const chavePrivada = await importPKCS8(credenciais.private_key, "RS256");
+  const assertion = await new SignJWT({ scope: "https://www.googleapis.com/auth/datastore" })
+    .setProtectedHeader({ alg: "RS256" })
+    .setIssuer(credenciais.client_email)
+    .setSubject(credenciais.client_email)
+    .setAudience("https://oauth2.googleapis.com/token")
+    .setIssuedAt(agora)
+    .setExpirationTime(agora + 3600)
+    .sign(chavePrivada);
+
+  const resp = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion
+    })
+  });
+  if (!resp.ok) {
+    throw new ErroSAVI(
+      "erro_configuracao",
+      "Não foi possível obter access token da service account junto do Google OAuth2.",
+      502
+    );
+  }
+  const dados = await resp.json();
+  _accessTokenCache = {
+    token: dados.access_token,
+    expiraEm: agora + (dados.expires_in || 3600)
+  };
+  return dados.access_token;
 }
 
 async function firestoreGet(env, path) {
@@ -296,29 +359,52 @@ async function registarAcesso(env, { metodoAcesso, pulseiraId, pacienteId, utili
 /**
  * Notifica o gestor do caso/família do acesso de emergência (art. 29.º
  * n.º 6, Lei 58/2019). Disparado com `ctx.waitUntil()` para não bloquear
- * a resposta ao utilizador.
+ * a resposta ao utilizador. Nunca inclui dados clínicos no corpo —
+ * apenas o facto de que houve um acesso, quando e por que método.
  *
- * TODO: configurar RESEND_API_KEY como secret (`wrangler secret put
- * RESEND_API_KEY`) antes de ativar este código.
+ * Duas configurações têm de existir antes disto enviar algo de verdade,
+ * nenhuma delas inventada aqui:
+ *   1. `wrangler secret put RESEND_API_KEY`
+ *   2. `env.RESEND_FROM_EMAIL` — um remetente num domínio verificado no
+ *      Resend (Resend > Domains). Enquanto não houver domínio verificado,
+ *      esta função regista um aviso e não envia, em vez de falhar o
+ *      pedido — a leitura de Nível 1 nunca deve ficar bloqueada por causa
+ *      da notificação.
+ *
+ * TODO real, não de código: decidir de onde vem `emailContacto` — o
+ * schema atual (`pacientes.contacto_familia` / `contacto_emergencia`) é
+ * texto livre, não necessariamente um email. Ver nota no README/CLAUDE.md
+ * antes de assumir que esse campo é sempre um endereço de email válido.
  */
 async function notificarTitularResend(env, { emailContacto, nomePaciente, metodoAcesso }) {
-  // Exemplo de payload (NUNCA incluir dados clínicos — alergias, condição
-  // crítica, medicação, etc. — apenas o facto de que houve um acesso):
-  //
-  // await fetch("https://api.resend.com/emails", {
-  //   method: "POST",
-  //   headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-  //   body: JSON.stringify({
-  //     from: "SAVI <notificacoes@savi-piloto.pt>", // TODO: domínio real verificado no Resend
-  //     to: emailContacto,
-  //     subject: "SAVI — acesso de emergência ao registo clínico",
-  //     text: `Houve um acesso de emergência (método: ${metodoAcesso}) aos dados de ${nomePaciente} ` +
-  //       `em ${new Date().toLocaleString("pt-PT")}. Este é um alerta automático — não contém dados clínicos.`
-  //   })
-  // });
-  //
-  // TODO: implementar a chamada real quando RESEND_API_KEY estiver configurado.
-  return Promise.resolve();
+  if (!emailContacto) {
+    console.warn("Notificação Resend ignorada: sem email de contacto para este paciente.");
+    return;
+  }
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM_EMAIL) {
+    console.warn("Notificação Resend ignorada: RESEND_API_KEY ou RESEND_FROM_EMAIL não configurados.");
+    return;
+  }
+  const resp = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM_EMAIL,
+      to: emailContacto,
+      subject: "SAVI — acesso de emergência ao registo clínico",
+      text:
+        `Houve um acesso de emergência (método: ${metodoAcesso}) aos dados de ${nomePaciente} ` +
+        `em ${new Date().toLocaleString("pt-PT")}. Este é um alerta automático — não contém dados clínicos.`
+    })
+  });
+  if (!resp.ok) {
+    // Nunca deixar a falha de notificação afetar o fluxo de break-glass —
+    // só regista, não lança erro.
+    console.error("Falha ao enviar notificação Resend:", resp.status, await resp.text().catch(() => ""));
+  }
 }
 
 // ---------------------------------------------------------------------

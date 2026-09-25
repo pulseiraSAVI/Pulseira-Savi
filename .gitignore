@@ -5,3 +5,11 @@ node_modules/
 .env.*
 !.env.example
 savi-demo-final.zip
+
+# Chaves de service account do Firebase — NUNCA commitar. Cobre o nome
+# gerado pela consola (*firebase-adminsdk*.json) e qualquer cópia local
+# que acabe dentro do repo (ex.: scripts/*.json) durante testes.
+*firebase-adminsdk*.json
+*service-account*.json
+scripts/*.json
+!scripts/package.json
