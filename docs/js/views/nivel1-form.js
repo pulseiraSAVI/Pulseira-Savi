@@ -50,7 +50,7 @@ function viewNivel1Form(root, pacienteId, contexto) {
     root.innerHTML = nav +
       '<div class="page">' +
       '<button class="link-discreto" id="btn-voltar" style="margin-bottom:10px;">← Pacientes</button>' +
-      "<h1>" + paciente.nome + "</h1>" +
+      "<h1>" + escapeAttr(paciente.nome) + "</h1>" +
       '<p class="subtitle">Nível 1. Estado clínico: <span class="badge ' + (dados.estado_verificacao || "nao_verificado") + '">' + (dados.estado_verificacao || "nao_verificado") + "</span>" +
       (dados.escrito_em ? " · última escrita em " + new Date(dados.escrito_em).toLocaleString("pt-PT") : "") +
       "</p>" +
@@ -82,23 +82,23 @@ function viewNivel1Form(root, pacienteId, contexto) {
       '<label>Peso (kg)</label><input type="number" step="0.1" id="f-peso" value="' + (dados.peso_kg ?? "") + '">' +
       '<label>Altura (cm)</label><input type="number" step="0.1" id="f-altura" value="' + (dados.altura_cm ?? "") + '">' +
       '<label>Data de registo da biometria</label><input type="date" id="f-biom-data" value="' + (dados.biometria_registada_em || "") + '">' +
-      '<label>Alergias</label><textarea id="f-alergias">' + (dados.alergias || "") + "</textarea>" +
+      '<label>Alergias</label><textarea id="f-alergias">' + escapeAttr(dados.alergias || "") + "</textarea>" +
       "</div>" +
       '<div class="card">' +
-      '<label>Condição crítica</label><textarea id="f-condicao">' + (dados.condicao_critica || "") + "</textarea>" +
-      '<label>Esquema de dose</label><textarea id="f-esquema-dose">' + (dados.esquema_dose || "") + "</textarea>" +
-      '<label>Medicação contraindicada</label><textarea id="f-medicacao-contra">' + (dados.medicacao_contraindicada || "") + "</textarea>" +
+      '<label>Condição crítica</label><textarea id="f-condicao">' + escapeAttr(dados.condicao_critica || "") + "</textarea>" +
+      '<label>Esquema de dose</label><textarea id="f-esquema-dose">' + escapeAttr(dados.esquema_dose || "") + "</textarea>" +
+      '<label>Medicação contraindicada</label><textarea id="f-medicacao-contra">' + escapeAttr(dados.medicacao_contraindicada || "") + "</textarea>" +
       "</div>" +
       "</div>" +
       '<div class="card">' +
       selectField("f-limitacao", "Limitação terapêutica", dados.limitacao_terapeutica, [["sim", "Sim"], ["nao", "Não"], ["nao_aplicavel", "Não aplicável"]]) +
-      '<label>Esquema de atuação perante crise</label><textarea id="f-crise">' + (dados.esquema_atuacao_crise || "") + "</textarea>" +
-      '<label>Notas</label><textarea id="f-notas">' + (dados.notas || "") + "</textarea>" +
+      '<label>Esquema de atuação perante crise</label><textarea id="f-crise">' + escapeAttr(dados.esquema_atuacao_crise || "") + "</textarea>" +
+      '<label>Notas</label><textarea id="f-notas">' + escapeAttr(dados.notas || "") + "</textarea>" +
       "</div>" +
 
       "<h2 style=\"font-size:15px;color:var(--navy);margin:20px 0 8px;\">3 · Medicação Habitual</h2>" +
       '<div class="card">' +
-      '<label>Medicação crónica + horário habitual de administração</label><textarea id="f-medicacao-cronica">' + (dados.medicacao_cronica || "") + "</textarea>" +
+      '<label>Medicação crónica + horário habitual de administração</label><textarea id="f-medicacao-cronica">' + escapeAttr(dados.medicacao_cronica || "") + "</textarea>" +
       "</div>" +
       '<div class="card">' +
       '<h3 style="margin-top:0;font-size:14px;color:var(--navy);">Documentos (RGPD + termo de responsabilidade)</h3>' +
@@ -230,7 +230,7 @@ function viewNivel1Form(root, pacienteId, contexto) {
       var verBotao = d.storage_path
         ? '<button class="link-discreto btn-ver-doc" data-storage-path="' + escapeAttr(d.storage_path) + '" style="margin-left:8px;">Ver</button>'
         : "";
-      return '<div class="doc-item"><span class="doc-icon">' + icone + '</span><div class="doc-info"><div class="doc-nome">' + d.nome_ficheiro + '</div><div class="doc-meta">' + rotulo + " · " + data + "</div></div>" + verBotao + "</div>";
+      return '<div class="doc-item"><span class="doc-icon">' + icone + '</span><div class="doc-info"><div class="doc-nome">' + escapeAttr(d.nome_ficheiro) + '</div><div class="doc-meta">' + rotulo + " · " + data + "</div></div>" + verBotao + "</div>";
     }).join("");
   }
 
@@ -260,8 +260,13 @@ function viewNivel1Form(root, pacienteId, contexto) {
     return html;
   }
 
+  // Antes só escapava aspas (seguro só para o contexto de atributo
+  // value="..."). Passa a delegar em domUtil.escapeHtml (escapa também
+  // & < > '), que serve tanto para atributos como para conteúdo de texto
+  // — usado agora também dentro de <textarea>...</textarea>, onde faltava
+  // qualquer escaping (ver AUDITORIA_SEGURANCA_25-09-2026.md).
   function escapeAttr(s) {
-    return String(s || "").replace(/"/g, "&quot;");
+    return domUtil.escapeHtml(s);
   }
 
   render();

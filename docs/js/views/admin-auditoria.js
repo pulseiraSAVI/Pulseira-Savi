@@ -24,15 +24,15 @@ async function viewAdminAuditoria(root) {
 
   function nomeUtilizador(id) {
     var p = profissionais.find(function (x) { return x.id === id; });
-    return p ? p.nome : "—";
+    return domUtil.escapeHtml(p ? p.nome : "—");
   }
   function nomePaciente(id) {
     var p = id ? pacientesPorId[id] : null;
-    return p ? p.nome : "—";
+    return domUtil.escapeHtml(p ? p.nome : "—");
   }
   function tokenPulseira(id) {
     var p = pulseiras.find(function (x) { return x.id === id; });
-    return p ? p.token : "—";
+    return domUtil.escapeHtml(p ? p.token : "—");
   }
   function rotuloMetodo(m) {
     var mapa = { pulseira: "Pulseira", numero_utente: "Número de utente", identidade: "Identidade" };
@@ -64,8 +64,8 @@ async function viewAdminAuditoria(root) {
       "<td>" + nomeUtilizador(a.utilizador_id) + "</td>" +
       "<td>" + nomePaciente(a.paciente_id) + "</td>" +
       "<td>" + (a.pulseira_id ? tokenPulseira(a.pulseira_id) : "—") + "</td>" +
-      "<td>" + (a.servico || "—") + "</td>" +
-      "<td>" + (a.motivo || "—") + "</td>" +
+      "<td>" + domUtil.escapeHtml(a.servico || "—") + "</td>" +
+      "<td>" + domUtil.escapeHtml(a.motivo || "—") + "</td>" +
       "<td>" + (a.notificado_titular_em ? new Date(a.notificado_titular_em).toLocaleString("pt-PT") : "pendente") + "</td>";
     tbody.appendChild(tr);
   });

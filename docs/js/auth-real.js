@@ -20,6 +20,19 @@
  *
  * Requer firebase-init.js carregado antes (espera pelo evento
  * "firebase-pronto", ver index.html para a ordem de carregamento).
+ *
+ * TODO CRÍTICO (auditoria de segurança, 25/09/2026 — ver
+ * AUDITORIA_SEGURANCA_25-09-2026.md, achado C1): o desenho descrito acima
+ * ("password = hash do PIN") tem um problema sério — o valor guardado em
+ * profissionais.pin_hash não é só uma verificação, é literalmente a
+ * password válida da conta no Firebase Auth. Quem tiver esse campo (um
+ * superadmin, uma cópia de segurança do Firestore) pode autenticar-se
+ * como essa conta sem nunca saber o PIN real. Ver o achado C1 para o
+ * desenho de correção (PBKDF2 com sal + Firebase Custom Tokens emitidos
+ * pelo Worker só depois de validar o PIN, em vez de o PIN ser a própria
+ * password). Não corrigido nesta sessão por mexer nas credenciais de
+ * contas já em produção — precisa de migração coordenada com o Worker e
+ * scripts/criar-conta.js.
  */
 (function (global) {
   "use strict";

@@ -24,19 +24,23 @@
      GitHub Pages.
 
      Ordem de carregamento: icons (biblioteca de SVG, sem dependências) ->
-     hash-util -> firebase-init (módulo, ver nota
-     acima) -> mockdb (só funções puras) -> firestore-real (acrescenta as
-     funções de dados a window.mockdb) -> worker-real -> auth-real ->
-     nav-helpers -> views -> router -> app.
+     dom-util (escapeHtml, sem dependências) -> hash-util -> firebase-init
+     (módulo, ver nota acima) -> mockdb (só funções puras) ->
+     firestore-real (acrescenta as funções de dados a window.mockdb) ->
+     worker-real -> auth-real -> nav-helpers -> views -> router -> app.
 
-     Nota: login-profissional.js, login-familia.js, scan.js,
-     familia-pacientes.js, familia-paciente-detalhe.js, admin-pacientes.js,
+     Auditoria de segurança de 25/09/2026
+     (AUDITORIA_SEGURANCA_25-09-2026.md): os ficheiros de demo/simulação
+     que nunca chegaram a ser carregados aqui (login-profissional.js,
+     login-familia.js, scan.js, familia-pacientes.js,
+     familia-paciente-detalhe.js, admin-pacientes.js,
      admin-nivel1-form.js, admin-profissionais.js, worker-sim.js,
-     auth-sim.js e mockdb-sim.js (se ainda existir) continuam em disco
-     mas NÃO são carregados aqui: não ficam alcançáveis por nenhuma rota
-     da app. A família está suspensa nesta revisão (ver CLAUDE.md, "Pivô
-     para produção") e o Nível 2 foi eliminado por completo. -->
+     auth-sim.js) foram removidos do repositório — eram código órfão,
+     inalcançável por qualquer rota da app desde o pivô de produção de
+     15/09/2026. A família está suspensa nesta revisão (ver CLAUDE.md,
+     "Pivô para produção") e o Nível 2 foi eliminado por completo. -->
 <script src="js/icons.js"></script>
+<script src="js/dom-util.js"></script>
 <script src="js/hash-util.js"></script>
 <script type="module" src="js/firebase-init.js"></script>
 <script src="js/mockdb.js"></script>

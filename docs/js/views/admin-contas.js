@@ -43,8 +43,8 @@ function viewAdminContas(root) {
     contas.forEach(function (p) {
       var tr = document.createElement("tr");
       tr.innerHTML =
-        "<td>" + p.nome + "</td>" +
-        "<td>" + p.credencial_ordem + "</td>" +
+        "<td>" + domUtil.escapeHtml(p.nome) + "</td>" +
+        "<td>" + domUtil.escapeHtml(p.credencial_ordem) + "</td>" +
         "<td>" + rotulosPapeis(p.papeis) + "</td>" +
         "<td>" + ((p.papeis || []).indexOf("superadmin") !== -1 && p.funcao_auditor ? "Sim" : "—") + "</td>" +
         '<td><span class="badge ' + (p.ativo ? "ativo" : "revogado") + '">' + (p.ativo ? "ativo" : "inativo") + "</span></td>" +

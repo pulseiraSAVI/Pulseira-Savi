@@ -18,8 +18,15 @@
  * auth-real.js nem icons.js) — sem irmos ao Nível 2 do CLAUDE.md
  * (não existe), mas isto significava que o precache do service worker
  * nunca tinha os ficheiros certos.
+ *
+ * v9 (25/09/2026): auditoria de código e segurança
+ * (AUDITORIA_SEGURANCA_25-09-2026.md) — adiciona js/dom-util.js
+ * (escapeHtml, corrige XSS armazenado em vários ecrãs) ao precache, e
+ * remove da lista os ficheiros órfãos entretanto apagados do
+ * repositório (nunca estiveram nesta lista de qualquer forma, por
+ * nunca terem sido carregados por index.html).
  */
-const SW_VERSION = "savi-v8";
+const SW_VERSION = "savi-v9";
 const CACHE_NAME = `savi-cache-${SW_VERSION}`;
 
 // Caminhos relativos ao scope do service worker (raiz de docs/), para
@@ -31,6 +38,7 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./css/styles.css",
   "./js/icons.js",
+  "./js/dom-util.js",
   "./js/hash-util.js",
   "./js/firebase-init.js",
   "./js/mockdb.js",

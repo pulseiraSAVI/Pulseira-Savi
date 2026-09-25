@@ -186,6 +186,24 @@ function validarJanelaDeSessao(claims) {
  * TODO: `env` precisaria de acesso ao Firestore já autenticado (ver
  * firestoreGet abaixo) para ler o pin_hash real da conta.
  */
+/**
+ * TODO CRÍTICO (auditoria de segurança, 25/09/2026 — ver
+ * AUDITORIA_SEGURANCA_25-09-2026.md, achado C1): esta função compara
+ * SHA-256 simples sem sal, e não há limite de tentativas — confirmado ao
+ * vivo (8 pedidos com PIN errado seguidos, todos aceites sem atraso nem
+ * bloqueio). Corrigir, coordenado com auth-real.js e scripts/criar-
+ * conta.js:
+ *   1. Migrar o hash do PIN para PBKDF2/scrypt com sal por conta (Web
+ *      Crypto API tem PBKDF2 nativo, sem biblioteca nova).
+ *   2. Adicionar contador de tentativas falhadas + bloqueio temporário
+ *      por conta (campos novos em profissionais/{id}, incrementados
+ *      aqui a cada pin_invalido).
+ *   3. Configurar uma Cloudflare Rate Limiting Rule em /acesso/* (painel,
+ *      sem código) como mitigação imediata enquanto 1-2 não estão prontos.
+ * Não implementado nesta sessão porque mexe na credencial de login das
+ * contas já em produção (TESTE01/02, UTIL01, ADMIN01) — precisa de
+ * migração coordenada, não de um commit isolado.
+ */
 async function validarPapelUtilizadorEPin(env, claims, pinRecebido) {
   if (!claims.papeis.includes("utilizador")) {
     throw new ErroSAVI("acesso_negado", "Esta conta não tem o papel de utilizador (break-glass).", 403);

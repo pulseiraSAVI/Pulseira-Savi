@@ -30,6 +30,16 @@ const admin = require("firebase-admin");
 
 const PAPEIS_VALIDOS = ["profissional", "utilizador", "superadmin"];
 
+// TODO CRÍTICO (auditoria de segurança, 25/09/2026 — ver
+// AUDITORIA_SEGURANCA_25-09-2026.md, achado C1): sha256Hex sem sal, usado
+// como password do Firebase Auth (ver mais abaixo, passwordAuth) — quem
+// tiver o valor de pin_hash consegue autenticar-se diretamente, sem saber
+// o PIN. Migrar para PBKDF2/scrypt com sal por conta, e a password do
+// Firebase Auth deixar de ser derivada do PIN (ver desenho completo no
+// achado C1: gerar password aleatória própria, ou migrar para Firebase
+// Custom Tokens emitidos pelo Worker após validar o PIN). Não corrigido
+// aqui porque exige re-emitir todas as contas já criadas em coordenação
+// com o Worker.
 function sha256Hex(texto) {
   // Tem de replicar exatamente docs/js/hash-util.js (SHA-256 hex, UTF-8,
   // sem sal) e a validação equivalente no Worker — o PIN nunca é guardado

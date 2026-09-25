@@ -119,6 +119,26 @@ deve estar pronto" ou de repetir trabalho já feito.
   provavelmente só propagação DNS/edge — nunca confirmado como
   resolvido; não voltou a surgir durante o teste E2E de 25/09).
 
+**Auditoria de código e segurança (25/09/2026) — ver
+`AUDITORIA_SEGURANCA_25-09-2026.md` para o relatório completo.**
+Corrigido nesta sessão: XSS armazenado em 6 ecrãs (o mais grave, no ecrã
+de Segurança/Auditoria, permitia a um `utilizador` comum correr código no
+browser do superadmin via o campo `motivo` do acesso por identidade — ver
+`docs/js/dom-util.js`, novo utilitário `escapeHtml` aplicado em todos os
+pontos identificados); 10 ficheiros órfãos de uma iteração de demo
+anterior, removidos do repositório (já estavam documentados em
+`index.html` como não carregados por nenhuma rota). `sw.js` →
+`savi-v9`. **Achado crítico ainda por corrigir, bloqueador para
+qualquer paciente adicional (mesmo fictício) até estar fechado:** o PIN
+de 5 caracteres funciona como a própria password do Firebase Auth
+(`SHA-256(PIN)` sem sal), sem limite de tentativas — confirmado ao vivo
+sem qualquer bloqueio ao fim de 8 tentativas erradas seguidas contra o
+Worker. Desenho de correção completo (PBKDF2 com sal + rate limiting +
+possível migração para Firebase Custom Tokens) já documentado como TODO
+em `backend/cloudflare-worker/src/index.js`, `docs/js/auth-real.js` e
+`scripts/criar-conta.js` — falta implementar e fazer o deploy
+coordenado (mexe nas credenciais das contas já em produção).
+
 **Pendente antes do primeiro paciente REAL — bloco legal/organizativo
 (NÃO se resolve com código, ver aviso logo no início deste documento):**
 - EIPD/DPIA formal.

@@ -58,12 +58,12 @@ function viewPacientesLista(root, contexto) {
       var criador = ehAdmin ? criadoresPorId[p.criado_por_id] : null;
       var tr = document.createElement("tr");
       tr.innerHTML =
-        "<td>" + p.nome + "</td>" +
+        "<td>" + domUtil.escapeHtml(p.nome) + "</td>" +
         "<td>" + mockdb.formatarIdade(p.data_nascimento) + "</td>" +
-        "<td>" + (p.numero_utente || "—") + "</td>" +
-        '<td><span class="badge ' + p.estado_consentimento + '">' + p.estado_consentimento + "</span></td>" +
-        '<td><span class="badge ' + (d.estado_verificacao || "nao_verificado") + '">' + (d.estado_verificacao || "nao_verificado") + "</span></td>" +
-        (ehAdmin ? "<td>" + (criador ? criador.nome : "—") + "</td>" : "") +
+        "<td>" + domUtil.escapeHtml(p.numero_utente || "—") + "</td>" +
+        '<td><span class="badge ' + domUtil.escapeHtml(p.estado_consentimento) + '">' + domUtil.escapeHtml(p.estado_consentimento) + "</span></td>" +
+        '<td><span class="badge ' + domUtil.escapeHtml(d.estado_verificacao || "nao_verificado") + '">' + domUtil.escapeHtml(d.estado_verificacao || "nao_verificado") + "</span></td>" +
+        (ehAdmin ? "<td>" + (criador ? domUtil.escapeHtml(criador.nome) : "—") + "</td>" : "") +
         "<td></td>";
       var tdAcao = tr.lastChild;
       var btn = document.createElement("button");

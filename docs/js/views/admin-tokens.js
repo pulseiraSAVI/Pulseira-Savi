@@ -50,7 +50,7 @@ function viewAdminTokens(root) {
     var tbodyLotes = document.getElementById("tbody-lotes");
     lotes.forEach(function (l) {
       var tr = document.createElement("tr");
-      tr.innerHTML = "<td>" + l.fornecedor + "</td><td>" + l.chip_modelo + "</td><td>" + l.quantidade + "</td><td>" + (l.preco_unitario != null ? l.preco_unitario.toFixed(2) + " €" : "—") + "</td><td>" + (l.data_receção || "—") + "</td>";
+      tr.innerHTML = "<td>" + domUtil.escapeHtml(l.fornecedor) + "</td><td>" + domUtil.escapeHtml(l.chip_modelo) + "</td><td>" + l.quantidade + "</td><td>" + (l.preco_unitario != null ? l.preco_unitario.toFixed(2) + " €" : "—") + "</td><td>" + domUtil.escapeHtml(l.data_receção || "—") + "</td>";
       tbodyLotes.appendChild(tr);
     });
 
@@ -62,9 +62,9 @@ function viewAdminTokens(root) {
       var paciente = p.paciente_id ? pacientesPorId[p.paciente_id] : null;
       var tr = document.createElement("tr");
       tr.innerHTML =
-        "<td>" + p.token + "</td>" +
-        '<td><span class="badge ' + p.estado + '">' + p.estado + "</span></td>" +
-        "<td>" + (paciente ? paciente.nome : "—") + "</td>" +
+        "<td>" + domUtil.escapeHtml(p.token) + "</td>" +
+        '<td><span class="badge ' + domUtil.escapeHtml(p.estado) + '">' + domUtil.escapeHtml(p.estado) + "</span></td>" +
+        "<td>" + (paciente ? domUtil.escapeHtml(paciente.nome) : "—") + "</td>" +
         "<td></td>";
       var tdAcao = tr.lastChild;
 
