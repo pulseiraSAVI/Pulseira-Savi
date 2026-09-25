@@ -71,6 +71,16 @@ deve estar pronto" ou de repetir trabalho já feito.
   `storage_path` verdadeiro; `nivel1-form.js` tem `<input type="file">`
   real (já não é só um campo de texto com o nome) e um botão "Ver" que
   pede um URL de download temporário (`obterUrlDocumento`).
+  Validado ao vivo em 25/09/2026: anexado um PDF de teste ao perfil de
+  "Maria Fictícia Teste" pela conta `TESTE01`, com upload e download
+  reais confirmados (pedido GET a `firebasestorage.googleapis.com` com
+  `alt=media&token=...` devolveu `200`). Foi necessário conceder
+  manualmente o papel "Cloud Datastore User" ao service agent
+  `service-<project-number>@gcp-sa-firebasestorage.iam.gserviceaccount.com`
+  em IAM (o `firebase deploy --only storage` tenta fazer isto sozinho
+  mas falhou com "Policy update access denied" — a conta que fez o
+  deploy não tinha permissão de admin de IAM; teve de ser adicionado à
+  mão em console.cloud.google.com/iam-admin/iam).
   **Lacuna conhecida, não é bug:** o ecrã de break-glass (papel
   utilizador, `resultado-nivel1.js`) ainda não mostra estes documentos
   — o Worker não devolve `documentos` na resposta de Nível 1, e mesmo
