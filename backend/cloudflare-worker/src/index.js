@@ -54,10 +54,19 @@ import { jwtVerify, createRemoteJWKSet, SignJWT, importPKCS8 } from "jose";
 // nunca hardcoded aqui.
 
 // Chave pública do Firebase Auth para verificação de ID tokens (JWKS).
-// Endpoint documentado pela Google para verificação de ID tokens do
-// Firebase Auth (securetoken).
+// IMPORTANTE (bug encontrado e corrigido a 25/09/2026, ao testar o
+// primeiro paciente fictício): NÃO confundir com o endpoint "x509"
+// (.../service_accounts/v1/metadata/x509/securetoken@system.gserviceaccount.com)
+// — esse devolve certificados PEM ({kid: "-----BEGIN CERTIFICATE-----..."}),
+// um formato que `createRemoteJWKSet` (jose) não sabe interpretar como
+// JWKS. O endpoint correto para verificação de JWT via JWKS é o "robot/jwk"
+// abaixo, que devolve o documento {"keys":[...]} no formato JWK esperado.
+// Usar o endpoint errado faz `jwtVerify` falhar SEMPRE, com qualquer token
+// (mesmo válido e dentro da janela de sessão) — apareceu disfarçado de
+// "Token de autenticação inválido ou expirado." em todos os 3 métodos de
+// acesso.
 const FIREBASE_JWKS_URL =
-  "https://www.googleapis.com/service_accounts/v1/metadata/x509/securetoken@system.gserviceaccount.com";
+  "https://www.googleapis.com/robot/v1/metadata/jwk/securetoken@system.gserviceaccount.com";
 
 const SESSAO_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos de inatividade (CLAUDE.md)
 
