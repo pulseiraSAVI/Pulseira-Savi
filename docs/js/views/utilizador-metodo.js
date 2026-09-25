@@ -17,15 +17,15 @@ function viewUtilizadorMetodo(root) {
     "</div>" +
     '<div class="scan-center">' +
     '<button class="role-btn" id="btn-pulseira">' +
-    '<span class="role-btn-title">📶 Ler pulseira</span>' +
+    '<span class="role-btn-title">' + SAVI_ICONS.nfc() + " Ler pulseira</span>" +
     '<span class="role-btn-sub">NFC ou QR</span>' +
     "</button>" +
     '<button class="role-btn" id="btn-numero-utente">' +
-    '<span class="role-btn-title">🔢 Número de utente</span>' +
+    '<span class="role-btn-title">' + SAVI_ICONS.numeroUtente() + " Número de utente</span>" +
     '<span class="role-btn-sub">Introdução manual</span>' +
     "</button>" +
     '<button class="role-btn" id="btn-identidade">' +
-    '<span class="role-btn-title">🪪 Identidade</span>' +
+    '<span class="role-btn-title">' + SAVI_ICONS.identidade() + " Identidade</span>" +
     '<span class="role-btn-sub">Nome completo + data de nascimento + sexo — exige motivo</span>' +
     "</button>" +
     "</div>" +

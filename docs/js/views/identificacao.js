@@ -13,7 +13,7 @@ function viewIdentificacao(root) {
     root.innerHTML =
       '<div class="phone-stage"><div class="phone"><div class="screen">' +
       '<div class="login-form-wrap">' +
-      '<div class="brand-mark">SAVI</div>' +
+      '<div class="brand-mark">' + SAVI_ICONS.marca() + " SAVI</div>" +
       '<div class="brand-sub">Sistema de Acesso Virtual a Informação Clínica</div>' +
       '<h2 style="font-size:16px;color:var(--navy);margin:10px 0 2px;">Identificação</h2>' +
       '<p style="font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;">Introduza o seu nº de Ordem e o PIN de 5 caracteres.</p>' +

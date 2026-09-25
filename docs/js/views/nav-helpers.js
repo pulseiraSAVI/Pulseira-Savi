@@ -19,7 +19,7 @@ function adminNav(sessao, ativo) {
   var auditoriaLink = sessao.funcao_auditor ? item("auditoria", "Segurança / Auditoria", "auditoria") : "";
   return (
     '<div class="app-topbar" style="flex-wrap:wrap;gap:8px;">' +
-    '<div class="brand">SAVI <small>Superadmin</small></div>' +
+    '<div class="brand">' + SAVI_ICONS.marcaClara() + '<span class="brand-text">SAVI <small>Superadmin</small></span></div>' +
     '<div class="user-info">' + sessao.nome + ' <button class="logout" id="btn-sair-topo">Terminar sessão</button></div>' +
     "</div>" +
     '<div style="background:var(--navy-2);padding:10px 20px;display:flex;flex-wrap:wrap;">' +
@@ -41,7 +41,7 @@ function profissionalNav(sessao, ativo) {
   }
   return (
     '<div class="app-topbar" style="flex-wrap:wrap;gap:8px;">' +
-    '<div class="brand">SAVI <small>Profissional</small></div>' +
+    '<div class="brand">' + SAVI_ICONS.marcaClara() + '<span class="brand-text">SAVI <small>Profissional</small></span></div>' +
     '<div class="user-info">' + sessao.nome + ' <button class="logout" id="btn-sair-topo">Terminar sessão</button></div>' +
     "</div>" +
     '<div style="background:var(--navy-2);padding:10px 20px;display:flex;flex-wrap:wrap;">' +

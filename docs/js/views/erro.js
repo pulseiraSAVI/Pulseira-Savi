@@ -5,14 +5,14 @@ function viewErro(root, tipo) {
   "use strict";
 
   var mapa = {
-    token_invalido: { titulo: "Token inválido", texto: "Esta pulseira não está registada no sistema SAVI. Verifique se está a ler a pulseira correta.", icon: "❌" },
-    pulseira_revogada: { titulo: "Pulseira revogada ou perdida", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Esta pulseira não está ativa.", icon: "🚫" },
-    nao_encontrado: { titulo: "Paciente não encontrado", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Não foi encontrado nenhum paciente com os dados indicados.", icon: "🔍" },
-    dados_invalidos: { titulo: "Dados incompletos", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Preencha todos os campos obrigatórios.", icon: "⚠️" },
-    motivo_obrigatorio: { titulo: "Motivo obrigatório", texto: "É obrigatório indicar um motivo para este método de acesso.", icon: "📝" },
-    sessao_expirada: { titulo: "Sessão expirada", texto: "A sua sessão terminou após 5 minutos de inatividade, por motivos de segurança. Autentique-se novamente para continuar.", icon: "⏱️" },
-    acesso_negado: { titulo: "Acesso não autorizado", texto: "Não tem permissões para aceder a esta área da aplicação.", icon: "🔒" },
-    erro: { titulo: "Ocorreu um erro", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Não foi possível concluir a operação.", icon: "⚠️" }
+    token_invalido: { titulo: "Token inválido", texto: "Esta pulseira não está registada no sistema SAVI. Verifique se está a ler a pulseira correta.", icon: SAVI_ICONS.erroToken() },
+    pulseira_revogada: { titulo: "Pulseira revogada ou perdida", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Esta pulseira não está ativa.", icon: SAVI_ICONS.erroRevogado() },
+    nao_encontrado: { titulo: "Paciente não encontrado", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Não foi encontrado nenhum paciente com os dados indicados.", icon: SAVI_ICONS.erroNaoEncontrado() },
+    dados_invalidos: { titulo: "Dados incompletos", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Preencha todos os campos obrigatórios.", icon: SAVI_ICONS.erroAviso() },
+    motivo_obrigatorio: { titulo: "Motivo obrigatório", texto: "É obrigatório indicar um motivo para este método de acesso.", icon: SAVI_ICONS.erroMotivo() },
+    sessao_expirada: { titulo: "Sessão expirada", texto: "A sua sessão terminou após 5 minutos de inatividade, por motivos de segurança. Autentique-se novamente para continuar.", icon: SAVI_ICONS.erroTempo() },
+    acesso_negado: { titulo: "Acesso não autorizado", texto: "Não tem permissões para aceder a esta área da aplicação.", icon: SAVI_ICONS.erroBloqueado() },
+    erro: { titulo: "Ocorreu um erro", texto: (window.SAVI_ultimoErroAcesso && window.SAVI_ultimoErroAcesso.mensagem) || "Não foi possível concluir a operação.", icon: SAVI_ICONS.erroAviso() }
   };
 
   var info = mapa[tipo] || mapa.erro;

@@ -6,9 +6,23 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- pulseira estilizada: anel aberto -->
-  <path d="M256 96a160 160 0 1 0 0.1 0z" fill="none" stroke="#E9E5DA" stroke-width="22" stroke-linecap="round" opacity="0.35"/>
-  <!-- linha de pulso cardíaco, elemento de assinatura -->
-  <path d="M96 266h64l24-56 40 112 32-160 28 104h32l24-40 20 40h56"
-        fill="none" stroke="#F6F5F1" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Marca SAVI: pulseira (arco aberto) com um elo central em forma de
+       cruz — o ponto de leitura NFC/QR — emitindo duas ondas de sinal
+       para o quadrante superior direito. Lê-se em qualquer tamanho,
+       inclusive minimizado a favicon: um único traço de espessura
+       constante, sem detalhe fino que se perca. -->
+
+  <!-- Ondas de sinal (canto superior direito, apontam para "fora" da
+       pulseira, sugerindo o break-glass a transmitir dados). -->
+  <path d="M338 146a92 92 0 0 1 0 128" fill="none" stroke="#6FB4CE" stroke-width="16" stroke-linecap="round" opacity="0.9"/>
+  <path d="M366 118a132 132 0 0 1 0 184" fill="none" stroke="#6FB4CE" stroke-width="16" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Arco da pulseira: aberto no topo, onde fica o elo/cruz. -->
+  <path d="M164 300a108 108 0 1 1 152 -134" fill="none" stroke="#F6F5F1" stroke-width="26" stroke-linecap="round"/>
+  <path d="M164 300a108 108 0 0 0 96 54" fill="none" stroke="#F6F5F1" stroke-width="26" stroke-linecap="round"/>
+
+  <!-- Elo/cruz central: o ponto de leitura da pulseira. -->
+  <rect x="266" y="120" width="66" height="66" rx="16" fill="#F6F5F1"/>
+  <path d="M299 138v30M284 153h30" stroke="#0E2A3B" stroke-width="12" stroke-linecap="round"/>
 </svg>

@@ -8,24 +8,35 @@
  * v7: pivô de produção de 15/09/2026 — novo modelo de papéis (utilizador/
  * profissional/superadmin+auditor), 3 métodos de acesso, Nível 1 novo
  * (cabeçalho + 4 secções de footer), Nível 2 eliminado, família suspensa.
+ *
+ * v8 (25/09/2026): camada de design — ícones SVG (js/icons.js, substitui
+ * todos os emojis da interface) e marca nova (icons/icon.svg, pulseira +
+ * cruz + sinal). Aproveitado para corrigir a lista ASSETS abaixo, que
+ * tinha ficado desatualizada desde a ligação à infraestrutura real
+ * (ainda apontava para worker-sim.js/auth-sim.js, e nunca chegou a
+ * incluir firebase-init.js/firestore-real.js/worker-real.js/
+ * auth-real.js nem icons.js) — sem irmos ao Nível 2 do CLAUDE.md
+ * (não existe), mas isto significava que o precache do service worker
+ * nunca tinha os ficheiros certos.
  */
-const SW_VERSION = "savi-v7";
+const SW_VERSION = "savi-v8";
 const CACHE_NAME = `savi-cache-${SW_VERSION}`;
 
 // Caminhos relativos ao scope do service worker (raiz de docs/), para
 // funcionar tanto na raiz do domínio como num subcaminho de GitHub Pages
-// (ex. https://<user>.github.io/savi/).
+// (ex. https://<user>.github.io/savi/). Mesma ordem de index.html.
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./css/styles.css",
+  "./js/icons.js",
   "./js/hash-util.js",
+  "./js/firebase-init.js",
   "./js/mockdb.js",
-  "./js/worker-sim.js",
-  "./js/auth-sim.js",
-  "./js/router.js",
-  "./js/app.js",
+  "./js/firestore-real.js",
+  "./js/worker-real.js",
+  "./js/auth-real.js",
   "./js/views/nav-helpers.js",
   "./js/views/identificacao.js",
   "./js/views/escolha-papel.js",
@@ -41,8 +52,10 @@ const ASSETS = [
   "./js/views/admin-tokens.js",
   "./js/views/admin-contas.js",
   "./js/views/admin-auditoria.js",
+  "./icons/icon.svg",
   "./icons/icon-192.png",
-  "./icons/icon-512.png"
+  "./icons/icon-512.png",
+  "./icons/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", (event) => {

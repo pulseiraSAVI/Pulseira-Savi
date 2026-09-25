@@ -224,7 +224,7 @@ function viewNivel1Form(root, pacienteId, contexto) {
   function renderListaDocs(documentos) {
     if (!documentos.length) return '<div class="empty-state">Sem documentos digitalizados.</div>';
     return documentos.map(function (d) {
-      var icone = d.tipo === "rgpd" ? "🛡️" : (d.tipo === "termo_responsabilidade" ? "📄" : "📎");
+      var icone = d.tipo === "rgpd" ? SAVI_ICONS.documentoRgpd() : (d.tipo === "termo_responsabilidade" ? SAVI_ICONS.documentoTermo() : SAVI_ICONS.documentoOutro());
       var rotulo = d.tipo === "rgpd" ? "Consentimento RGPD" : (d.tipo === "termo_responsabilidade" ? "Termo de responsabilidade" : "Documento");
       var data = d.enviado_em ? new Date(d.enviado_em).toLocaleDateString("pt-PT") : "—";
       var verBotao = d.storage_path

@@ -23,7 +23,8 @@
      `cd docs && python3 -m http.server 8000`, ou já publicado no
      GitHub Pages.
 
-     Ordem de carregamento: hash-util -> firebase-init (módulo, ver nota
+     Ordem de carregamento: icons (biblioteca de SVG, sem dependências) ->
+     hash-util -> firebase-init (módulo, ver nota
      acima) -> mockdb (só funções puras) -> firestore-real (acrescenta as
      funções de dados a window.mockdb) -> worker-real -> auth-real ->
      nav-helpers -> views -> router -> app.
@@ -35,6 +36,7 @@
      mas NÃO são carregados aqui: não ficam alcançáveis por nenhuma rota
      da app. A família está suspensa nesta revisão (ver CLAUDE.md, "Pivô
      para produção") e o Nível 2 foi eliminado por completo. -->
+<script src="js/icons.js"></script>
 <script src="js/hash-util.js"></script>
 <script type="module" src="js/firebase-init.js"></script>
 <script src="js/mockdb.js"></script>

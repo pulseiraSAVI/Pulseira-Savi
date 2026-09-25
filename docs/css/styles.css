@@ -22,6 +22,11 @@
   --bg-app:#E9E5DA;
   --danger:#B23A2E;
   --ok:#1E6B45;
+  /* Acento "sinal" — a mesma cor das ondas NFC/QR da marca SAVI
+     (docs/icons/icon.svg). Usado com moderação: ícones ativos, foco de
+     marca, nunca como cor de texto de leitura corrida. */
+  --accent:#4FA8C7;
+  --accent-soft:#E4F1F5;
 }
 
 *{box-sizing:border-box;}
@@ -42,6 +47,15 @@ body{
 a{color:inherit;}
 button{font-family:inherit;}
 
+/* ---------- Ícones SVG inline (js/icons.js) ----------
+   Substituem por completo os emojis na interface. `currentColor` faz o
+   SVG herdar sempre a cor de texto do contentor (card-label, botão,
+   etc.), por isso raramente é preciso CSS extra por ícone — só o
+   tamanho, aqui e nos overrides de contexto abaixo. */
+.icon{display:inline-flex; flex-shrink:0; line-height:0; vertical-align:-2px;}
+.icon svg{width:1em; height:1em;}
+.card-label .icon svg{width:14px; height:14px;}
+
 /* ---------- Barra de topo comum (fora do "telemóvel") ---------- */
 .app-topbar{
   background:var(--navy);
@@ -57,7 +71,13 @@ button{font-family:inherit;}
   font-weight:800;
   letter-spacing:.03em;
   font-size:15px;
+  display:flex;
+  align-items:center;
+  gap:8px;
 }
+.brand-glyph{display:inline-flex; flex-shrink:0; line-height:0;}
+.brand-glyph svg{width:1.7em; height:1.7em;}
+.brand-text{display:flex; flex-direction:column;}
 .app-topbar .brand small{
   display:block;
   font-weight:400;
@@ -327,7 +347,8 @@ tr:hover td{background:#FAFAF7;}
 .modal-actions{display:flex; gap:10px;}
 
 .login-form-wrap{padding:26px 22px;}
-.login-form-wrap .brand-mark{color:var(--navy); font-weight:800; font-size:17px; margin-bottom:2px;}
+.login-form-wrap .brand-mark{color:var(--navy); font-weight:800; font-size:17px; margin-bottom:2px; display:flex; align-items:center; gap:8px;}
+.login-form-wrap .brand-mark .brand-glyph svg{width:1.9em; height:1.9em;}
 .login-form-wrap .brand-sub{color:var(--ink-soft); font-size:12px; margin-bottom:20px;}
 
 .scan-center{
@@ -336,9 +357,10 @@ tr:hover td{background:#FAFAF7;}
 }
 .scan-circle{
   width:150px; height:150px; border-radius:50%; background:var(--navy-2); color:#fff;
-  display:flex; align-items:center; justify-content:center; font-size:44px;
+  display:flex; align-items:center; justify-content:center;
   border:6px solid #E8DFC9;
 }
+.scan-circle .icon svg{width:56px; height:56px;}
 .demo-token-list{width:100%; text-align:left; margin-top:10px;}
 .demo-token-list button{
   width:100%; text-align:left; background:#fff; border:1px solid var(--line); border-radius:10px;
@@ -360,7 +382,8 @@ tr:hover td{background:#FAFAF7;}
 }
 .role-btn:hover{border-color:var(--navy);}
 .role-btn:active{background:#FAFAF7;}
-.role-btn-title{display:block; font-size:14.5px; font-weight:700; color:var(--navy);}
+.role-btn-title{display:flex; align-items:center; gap:8px; font-size:14.5px; font-weight:700; color:var(--navy);}
+.role-btn-title .icon svg{width:18px; height:18px;}
 .role-btn-sub{display:block; font-size:12px; color:var(--ink-soft); margin-top:3px; line-height:1.4;}
 
 /* ---------- PIN de 5 caracteres ---------- */
@@ -378,7 +401,8 @@ tr:hover td{background:#FAFAF7;}
   background:none; border:none; padding:9px 4px 8px; cursor:pointer; color:var(--ink-soft);
 }
 .footer-nav-item.active{color:var(--navy);}
-.footer-nav-icon{font-size:18px; line-height:1;}
+.footer-nav-icon{line-height:1;}
+.footer-nav-icon .icon svg{width:20px; height:20px;}
 .footer-nav-label{font-size:9.5px; font-weight:700; text-align:center; line-height:1.25; letter-spacing:.01em;}
 
 /* ---------- Lista de documentos digitalizados (RGPD/termo de responsabilidade) ---------- */
@@ -387,7 +411,8 @@ tr:hover td{background:#FAFAF7;}
   display:flex; align-items:center; gap:10px; background:#fff; border:1px solid var(--line);
   border-radius:10px; padding:10px 12px;
 }
-.doc-icon{font-size:18px; flex-shrink:0;}
+.doc-icon .icon svg{width:20px; height:20px;}
+.doc-icon{color:var(--navy); flex-shrink:0;}
 .doc-info{flex:1; min-width:0;}
 .doc-nome{font-size:13px; font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .doc-meta{font-size:11px; color:var(--ink-soft); margin-top:2px;}

@@ -74,13 +74,13 @@ function viewResultadoNivel1(root) {
       '<div class="section-title">Contacto de familiares</div>' +
       '<div class="contact-card">' +
       '<div><div class="who">Familiares</div><div class="name">' + (paciente.contacto_familia || "Sem contacto registado") + "</div></div>" +
-      '<button class="call-btn" id="btn-ligar-familia">📞 Ligar</button>' +
+      '<button class="call-btn" id="btn-ligar-familia">' + SAVI_ICONS.telefone() + " Ligar</button>" +
       "</div>" +
 
       '<div class="section-title">Contacto de emergência</div>' +
       '<div class="contact-card">' +
       '<div><div class="who">Emergência</div><div class="name">' + (paciente.contacto_emergencia || "Sem contacto registado") + "</div></div>" +
-      '<button class="call-btn" id="btn-ligar-emergencia">📞 Ligar</button>' +
+      '<button class="call-btn" id="btn-ligar-emergencia">' + SAVI_ICONS.telefone() + " Ligar</button>" +
       "</div>" +
 
       '<div class="section-title">Gestor do caso</div>' +
@@ -97,7 +97,7 @@ function viewResultadoNivel1(root) {
   function conteudoAlgoritmo() {
     return (
       '<div class="card alert">' +
-      '<p class="card-label">⚠ Alergias</p>' +
+      '<p class="card-label">' + SAVI_ICONS.alergia() + " Alergias</p>" +
       '<p class="card-value">' + (dados.alergias || "Sem registo") + "</p>" +
       "</div>" +
 
@@ -108,7 +108,7 @@ function viewResultadoNivel1(root) {
       "</div>" +
 
       '<div class="card crisis">' +
-      '<p class="card-label">✦ Condição crítica</p>' +
+      '<p class="card-label">' + SAVI_ICONS.condicaoCritica() + " Condição crítica</p>" +
       '<p class="card-value">' + (dados.condicao_critica || "Sem registo") + "</p>" +
       (dados.esquema_atuacao_crise ? '<p class="card-sub"><b>Esquema de atuação perante crise:</b> ' + dados.esquema_atuacao_crise + "</p>" : "") +
       "</div>" +
@@ -145,9 +145,9 @@ function viewResultadoNivel1(root) {
   }
 
   function iconeDocumento(tipo) {
-    if (tipo === "rgpd") return "🛡️";
-    if (tipo === "termo_responsabilidade") return "📄";
-    return "📎";
+    if (tipo === "rgpd") return SAVI_ICONS.documentoRgpd();
+    if (tipo === "termo_responsabilidade") return SAVI_ICONS.documentoTermo();
+    return SAVI_ICONS.documentoOutro();
   }
 
   function conteudoMedicacao() {
@@ -215,10 +215,10 @@ function viewResultadoNivel1(root) {
       "</div>" +
       '<div class="scroll" id="tab-content"></div>' +
       '<div class="footer-nav">' +
-      footerBtn("utente", "Dados do utente", "🧾") +
-      footerBtn("algoritmo", "Algoritmo", "🧠") +
-      footerBtn("medicacao", "Medicação Habitual", "💊") +
-      footerBtn("config", "Configuração", "⚙️") +
+      footerBtn("utente", "Dados do utente", SAVI_ICONS.dadosUtente()) +
+      footerBtn("algoritmo", "Algoritmo", SAVI_ICONS.algoritmo()) +
+      footerBtn("medicacao", "Medicação Habitual", SAVI_ICONS.medicacaoHabitual()) +
+      footerBtn("config", "Configuração", SAVI_ICONS.configuracao()) +
       "</div>" +
       "</div></div></div>";
 

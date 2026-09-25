@@ -42,7 +42,7 @@ function viewUtilizadorPulseira(root) {
     '<div class="meta">Serviço: ' + (sessao.servico || "—") + "</div>" +
     "</div>" +
     '<div class="scan-center">' +
-    '<div class="scan-circle">📶</div>' +
+    '<div class="scan-circle">' + SAVI_ICONS.nfc() + "</div>" +
     '<div id="scan-erro" style="color:var(--alert);font-size:12.5px;"></div>' +
     '<label style="margin-top:14px;">Token da pulseira (NFC/QR)</label>' +
     '<input type="text" id="in-token" placeholder="Ex.: SAVI-XXXXXX-001">' +
