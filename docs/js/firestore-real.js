@@ -209,7 +209,13 @@
     },
     solicitarPulseiraParaPaciente: async function (pacienteId) {
       var s = sdk();
-      var q = s.query(s.collection(s.db, "pulseiras"), s.where("estado", "==", "nao_atribuida"));
+      // Filtra por paciente_id == null (não por estado) de propósito: é o
+      // campo que a regra de leitura de `pulseiras` para o papel
+      // profissional verifica diretamente (resource.data.paciente_id ==
+      // null), e no nosso schema só as pulseiras nao_atribuida têm
+      // paciente_id nulo — ver nota em firestore.rules sobre a mesma
+      // limitação encontrada em `pacientes`.
+      var q = s.query(s.collection(s.db, "pulseiras"), s.where("paciente_id", "==", null));
       var snap = await s.getDocs(q);
       if (snap.empty) throw new Error("Não há pulseiras disponíveis por atribuir. Gere um novo lote.");
       var livre = snap.docs[0];

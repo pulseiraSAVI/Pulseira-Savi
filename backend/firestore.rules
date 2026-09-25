@@ -166,6 +166,15 @@ service cloud.firestore {
       // O profissional pode ler pulseiras dos pacientes que criou (para
       // "Solicitar pulseira") e atribuir uma pulseira não atribuída a um
       // desses pacientes — nunca a pacientes de outro profissional.
+      // Nota (25/09/2026): para listar as pulseiras nao_atribuida, o
+      // frontend (firestore-real.js) tem de filtrar por
+      // `where('paciente_id','==', null)` — nunca por `estado` — porque só
+      // o primeiro ramo desta condição (`resource.data.paciente_id ==
+      // null`) é verificável estaticamente pelo Firestore para uma query de
+      // lista; um filtro por `estado` não corresponde a nenhum campo desta
+      // regra e a lista inteira é recusada com "Missing or insufficient
+      // permissions", mesmo com resultado vazio. Mesma limitação que levou
+      // à correção da regra de `pacientes`.
       allow read: if isProfissional() &&
         (resource.data.paciente_id == null || ehCriadorDoPaciente(resource.data.paciente_id));
       allow update: if isProfissional() &&
