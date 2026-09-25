@@ -65,6 +65,27 @@ const SESSAO_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos de inatividade (CLAUDE.md)
 // Utilitários
 // ---------------------------------------------------------------------
 
+// CORS — o frontend (docs/) corre num origin diferente do Worker (GitHub
+// Pages vs. workers.dev), por isso o browser faz sempre um preflight
+// OPTIONS antes do POST real. Sem isto, o browser bloqueia a resposta
+// mesmo que o Worker a tenha processado corretamente — nunca usar "*"
+// aqui: só refletir o Access-Control-Allow-Origin quando o origin do
+// pedido está nesta lista, para não abrir o endpoint a qualquer site.
+const ORIGENS_PERMITIDAS = [
+  "https://pulseirasavi.github.io",
+  "http://localhost:8000",
+  "http://127.0.0.1:8000"
+];
+
+function corsHeaders(request) {
+  const origin = request && request.headers.get("origin");
+  const headers = { "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type, authorization" };
+  if (origin && ORIGENS_PERMITIDAS.includes(origin)) {
+    headers["access-control-allow-origin"] = origin;
+  }
+  return headers;
+}
+
 function jsonResponse(body, status) {
   return new Response(JSON.stringify(body), {
     status: status || 200,
@@ -615,26 +636,42 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    // Preflight CORS — o browser envia sempre isto antes do POST real,
+    // porque o pedido tem um cabeçalho Authorization personalizado. Nunca
+    // passa pelos handlers de negócio, responde já aqui.
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders(request) });
+    }
+
+    let resposta;
     try {
       if (request.method === "POST" && url.pathname === "/acesso/pulseira") {
-        return await handleAcessoPulseira(request, env, ctx);
+        resposta = await handleAcessoPulseira(request, env, ctx);
+      } else if (request.method === "POST" && url.pathname === "/acesso/numero-utente") {
+        resposta = await handleAcessoNumeroUtente(request, env, ctx);
+      } else if (request.method === "POST" && url.pathname === "/acesso/identidade") {
+        resposta = await handleAcessoIdentidade(request, env, ctx);
+      } else {
+        // Nota: não existe /nivel2 nem qualquer rota equivalente — Nível 2
+        // foi eliminado por completo desta revisão (CLAUDE.md).
+        resposta = jsonResponse({ erro: "nao_encontrado", mensagem: "Rota desconhecida." }, 404);
       }
-      if (request.method === "POST" && url.pathname === "/acesso/numero-utente") {
-        return await handleAcessoNumeroUtente(request, env, ctx);
-      }
-      if (request.method === "POST" && url.pathname === "/acesso/identidade") {
-        return await handleAcessoIdentidade(request, env, ctx);
-      }
-      // Nota: não existe /nivel2 nem qualquer rota equivalente — Nível 2
-      // foi eliminado por completo desta revisão (CLAUDE.md).
-      return jsonResponse({ erro: "nao_encontrado", mensagem: "Rota desconhecida." }, 404);
     } catch (e) {
       if (e instanceof ErroSAVI) {
-        return jsonResponse({ erro: e.tipo, mensagem: e.message }, e.status);
+        resposta = jsonResponse({ erro: e.tipo, mensagem: e.message }, e.status);
+      } else {
+        // Nunca expor detalhes internos (stack traces, etc.) ao cliente.
+        console.error(e);
+        resposta = jsonResponse({ erro: "erro", mensagem: "Ocorreu um erro interno." }, 500);
       }
-      // Nunca expor detalhes internos (stack traces, etc.) ao cliente.
-      console.error(e);
-      return jsonResponse({ erro: "erro", mensagem: "Ocorreu um erro interno." }, 500);
     }
+
+    // Junta os cabeçalhos CORS à resposta real, seja ela qual for — feito
+    // aqui, uma única vez, para não ter de passar `request` a cada chamada
+    // de jsonResponse() nos handlers acima.
+    const headersComCors = new Headers(resposta.headers);
+    const extra = corsHeaders(request);
+    Object.keys(extra).forEach((k) => headersComCors.set(k, extra[k]));
+    return new Response(resposta.body, { status: resposta.status, headers: headersComCors });
   }
 };
