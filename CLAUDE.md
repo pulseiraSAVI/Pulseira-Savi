@@ -67,13 +67,31 @@ deve estar pronto" ou de repetir trabalho já feito.
   `RESEND_API_KEY` + `RESEND_FROM_EMAIL` em `wrangler.toml`) para a
   notificação obrigatória de acesso — sem isto o Worker funciona
   normalmente, só não notifica.
-- Testar de ponta a ponta com um paciente fictício por http(s): criar
-  conta de profissional via `scripts/criar-conta.js`, identificar-se,
-  registar paciente, escrever `dados_nivel1`, solicitar pulseira, e
-  validar os 3 métodos de break-glass a partir do papel utilizador.
+- ~~Testar de ponta a ponta com um paciente fictício por http(s)~~ —
+  **feito e validado em 25/09/2026.** Paciente fictícia "Maria Fictícia
+  Teste" criada, `dados_nivel1` escritos, pulseira `SAVI-ZGNBR1-007`
+  atribuída, e os 3 métodos de break-glass (pulseira, número de utente,
+  identidade) confirmados a funcionar de ponta a ponta, com registo
+  correto em `acessos` para os 3 (visível na vista de superadmin
+  "Segurança / Auditoria"). Confirmado também que as Firestore Rules
+  bloqueiam corretamente o acesso cruzado entre profissionais (conta
+  `TESTE02` não vê os pacientes criados por `TESTE01`).
+- No caminho, foram encontrados e corrigidos 4 bugs reais (não
+  scaffolding): (1) regra de `pacientes` com `get()` auto-referencial
+  quebrava a verificação estática de query de lista no Firestore; (2)
+  `solicitarPulseiraParaPaciente` filtrava por `estado` em vez de
+  `paciente_id==null`, mesma causa; (3) o Worker não respondia ao
+  preflight CORS, bloqueando todo pedido do frontend (GitHub Pages) para
+  o `workers.dev`; (4) **o mais sério** — `verificarIdToken` no Worker
+  usava o endpoint x509 (certificados PEM) do Google em vez do endpoint
+  JWKS real (`robot/v1/metadata/jwk/...`), pelo que a verificação do ID
+  token falhava SEMPRE, disfarçado de "sessão expirada" — nenhum acesso
+  break-glass real alguma vez tinha funcionado antes desta correção.
+  Ver commits do dia para o detalhe de cada correção.
 - Reverificar se o `workers.dev` do Worker já resolve TLS sem falhas
   (houve um handshake a falhar logo após o registo do subdomínio,
-  provavelmente só propagação DNS/edge — nunca confirmado como resolvido).
+  provavelmente só propagação DNS/edge — nunca confirmado como
+  resolvido; não voltou a surgir durante o teste E2E de 25/09).
 
 **Pendente antes do primeiro paciente REAL — bloco legal/organizativo
 (NÃO se resolve com código, ver aviso logo no início deste documento):**
