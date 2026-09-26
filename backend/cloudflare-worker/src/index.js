@@ -80,6 +80,16 @@ const SESSAO_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos de inatividade (CLAUDE.md)
 // mesmo que o Worker a tenha processado corretamente — nunca usar "*"
 // aqui: só refletir o Access-Control-Allow-Origin quando o origin do
 // pedido está nesta lista, para não abrir o endpoint a qualquer site.
+// Risco médio da auditoria (AUDITORIA_SEGURANCA_25-09-2026.md): as
+// origens de desenvolvimento vivem na mesma lista que a de produção.
+// Decisão de 26/09/2026: manter assim por agora — CORS só limita
+// JavaScript de browser (não bloqueia curl/Postman/outro backend), por
+// isso não é um risco de acesso direto, só uma prática a corrigir. Separar
+// por ambiente exige `wrangler.toml` com [env.production]/[env.dev] e um
+// pipeline de deploy que escolha o ambiente certo — mudança de processo,
+// não só de código, por isso fica para quando esse pipeline existir, para
+// não arriscar partir os testes locais (`python3 -m http.server 8000`)
+// sem necessidade agora.
 const ORIGENS_PERMITIDAS = [
   "https://pulseirasavi.github.io",
   "http://localhost:8000",
@@ -450,21 +460,44 @@ async function firestoreQueryUm(env, collectionId, fieldPath, value) {
  * e filtra em memória. TODO: se o piloto crescer, criar índice composto
  * e usar uma query estruturada com 3 fieldFilters em AND.
  */
+// CORRIGIDO em 26/09/2026 (achado A3 da auditoria, AUDITORIA_SEGURANCA_
+// 25-09-2026.md): esta função fazia um GET a toda a coleção `pacientes`
+// para a memória do Worker e filtrava os 3 campos em JavaScript —
+// aceitável a 50 pacientes (Fase 1), mas não escala e mantém
+// desnecessariamente na memória os dados administrativos de todos os
+// pacientes só para responder a um único pedido. Passa a usar uma query
+// estruturada com filtro composto em `data_nascimento` + `sexo`
+// (igualdade em dois campos não exige índice composto no Firestore) —
+// reduz o conjunto candidato a, tipicamente, um punhado de documentos
+// antes de comparar `nome` em memória (essa comparação continua em JS
+// porque é case-insensitive/trim, o que uma EQUAL do Firestore não faz).
 async function firestoreQueryPorIdentidade(env, nomeCompleto, dataNascimento, sexo) {
   const accessToken = await obterAccessTokenServiceAccount(env);
-  const resp = await fetch(`${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}/pacientes`, {
-    headers: { authorization: `Bearer ${accessToken}` }
+  const body = {
+    structuredQuery: {
+      from: [{ collectionId: "pacientes" }],
+      where: {
+        compositeFilter: {
+          op: "AND",
+          filters: [
+            { fieldFilter: { field: { fieldPath: "data_nascimento" }, op: "EQUAL", value: { stringValue: dataNascimento } } },
+            { fieldFilter: { field: { fieldPath: "sexo" }, op: "EQUAL", value: { stringValue: sexo } } }
+          ]
+        }
+      }
+    }
+  };
+  const resp = await fetch(`${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}:runQuery`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify(body)
   });
   if (!resp.ok) throw new ErroSAVI("erro", "Erro ao consultar pacientes.", 502);
-  const resultado = await resp.json();
-  const docs = resultado.documents || [];
+  const resultados = await resp.json();
+  const docs = resultados.filter((r) => r.document).map((r) => r.document);
   const alvo = docs.find((doc) => {
     const campos = extrairCampos(doc);
-    return (
-      (campos.nome || "").trim().toLowerCase() === nomeCompleto.trim().toLowerCase() &&
-      campos.data_nascimento === dataNascimento &&
-      campos.sexo === sexo
-    );
+    return (campos.nome || "").trim().toLowerCase() === nomeCompleto.trim().toLowerCase();
   });
   return alvo || null;
 }
