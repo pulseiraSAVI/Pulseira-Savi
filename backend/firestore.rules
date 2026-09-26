@@ -24,6 +24,13 @@
  *
  * A família está suspensa nesta revisão — sem custom claim própria, sem
  * regras de família nesta versão do documento.
+ *
+ * 26/09/2026 (achado A1, AUDITORIA_SEGURANCA_25-09-2026.md): as regras
+ * validavam sempre a posse do documento mas nunca o CONTEÚDO dos campos
+ * de estado (estado_consentimento, estado_verificacao,
+ * limitacao_terapeutica) — um cliente a falar diretamente com o SDK do
+ * Firestore podia escrever qualquer string nesses campos. Ver
+ * estadoConsentimentoValido()/dadosNivel1Validos() abaixo.
  */
 rules_version = '2';
 
@@ -71,6 +78,24 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------
+    // Validação de enums (achado A1 da auditoria de 25/09/2026): as
+    // regras só verificavam posse, nunca o CONTEÚDO dos campos — um
+    // cliente que fale diretamente com o SDK do Firestore (não a UI
+    // normal) podia escrever qualquer string nestes campos de estado.
+    // Aplicada tanto ao superadmin como ao profissional (é validação de
+    // integridade de dados, não de controlo de acesso — não faz sentido
+    // dispensar só porque quem escreve tem mais privilégios).
+    // ------------------------------------------------------------------
+    function estadoConsentimentoValido(dados) {
+      return dados.estado_consentimento in ['pendente', 'ativo', 'revogado'];
+    }
+
+    function dadosNivel1Validos(dados) {
+      return dados.estado_verificacao in ['nao_verificado', 'verificado'] &&
+        dados.limitacao_terapeutica in ['sim', 'nao', 'nao_aplicavel'];
+    }
+
+    // ------------------------------------------------------------------
     // dados_nivel1 — dados clínicos essenciais (o coração do sistema)
     // Documento por paciente: /dados_nivel1/{pacienteId}
     // Leitura pelo papel 'utilizador' (break-glass) NUNCA passa por aqui
@@ -79,15 +104,17 @@ service cloud.firestore {
     // ------------------------------------------------------------------
     match /dados_nivel1/{pacienteId} {
       allow read: if podeGerirPaciente(pacienteId);
-      allow write: if podeGerirPaciente(pacienteId);
+      allow write: if podeGerirPaciente(pacienteId) && dadosNivel1Validos(request.resource.data);
     }
 
     // ------------------------------------------------------------------
     // pacientes — dados administrativos/identificativos (não clínicos)
     // ------------------------------------------------------------------
     match /pacientes/{pacienteId} {
-      // Superadmin: acesso total.
-      allow read, write: if isSuperadmin();
+      // Superadmin: acesso total, mas sujeito à mesma validação de
+      // conteúdo que o profissional (A1) — só a posse é que não se aplica.
+      allow read: if isSuperadmin();
+      allow write: if isSuperadmin() && estadoConsentimentoValido(request.resource.data);
 
       // Profissional: só o(s) paciente(s) que ele próprio criou. Comparação
       // DIRETA a resource.data (não via ehCriadorDoPaciente/get()) de
@@ -99,15 +126,21 @@ service cloud.firestore {
       // ehCriadorDoPaciente fazia aqui) falha com "Missing or insufficient
       // permissions" mesmo quando o resultado seria vazio ou legítimo.
       // Descoberto e corrigido ao testar o primeiro paciente fictício
-      // (25/09/2026).
-      allow read, update, delete: if isProfissional() &&
+      // (25/09/2026). O "read" fica à parte de "update/delete" de
+      // propósito, para que a validação de enum (A1) só se aplique a
+      // escritas, nunca bloqueie a leitura/list.
+      allow read, delete: if isProfissional() &&
         resource.data.criado_por_id == request.auth.token.profissional_id;
+      allow update: if isProfissional() &&
+        resource.data.criado_por_id == request.auth.token.profissional_id &&
+        estadoConsentimentoValido(request.resource.data);
 
       // Criação: qualquer profissional pode criar um paciente novo, desde
       // que se registe a si próprio como criado_por_id (nunca em nome de
       // outro profissional).
       allow create: if isProfissional() &&
-        request.resource.data.criado_por_id == request.auth.token.profissional_id;
+        request.resource.data.criado_por_id == request.auth.token.profissional_id &&
+        estadoConsentimentoValido(request.resource.data);
     }
 
     // ------------------------------------------------------------------
