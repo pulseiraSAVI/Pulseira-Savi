@@ -40,7 +40,9 @@
  * só é criada dentro de render(), e só quando idEmEdicao já apontava
  * para a conta certa ANTES da tabela ser construída — na prática, nunca
  * na primeira vez que se clicava). Corrigido em admin-contas.js para
- * chamar render() em vez disso.
+ * chamar render() em vez disso. Também corrigido aqui: o install()
+ * deste ficheiro passou a pedir cada asset com {cache:"reload"} — ver
+ * comentário no próprio handler para a razão.
  */
 const SW_VERSION = "savi-v11";
 const CACHE_NAME = `savi-cache-${SW_VERSION}`;
@@ -82,8 +84,21 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
+  // 26/09/2026: cache.addAll(ASSETS) sozinho pode ir buscar uma resposta
+  // já presente no cache HTTP normal do browser (não o Cache Storage do
+  // service worker) — mesmo com SW_VERSION incrementado, se o browser já
+  // tinha pedido aquele URL há menos de max-age (600s no GitHub Pages), o
+  // addAll() aceita esse hit "stale" sem sequer contactar a rede. Ou seja,
+  // um deploy podia ficar precacheado com ficheiros antigos se alguém
+  // tivesse acabado de visitar a página momentos antes. Corrigido a pedir
+  // cada asset com {cache: "reload"}, que força sempre uma validação real
+  // ao servidor, ignorando o cache HTTP do browser.
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME)
+      .then((cache) => Promise.all(ASSETS.map((url) =>
+        fetch(url, { cache: "reload" }).then((res) => cache.put(url, res))
+      )))
+      .then(() => self.skipWaiting())
   );
 });
 
