@@ -98,34 +98,67 @@ assim).
 
 **Depende de:** nada do bloco legal. Só depende de acesso a um Android.
 
-### 1.5 Notificações em tempo real de eventos de superadmin (Telegram + Web Push) + PDF de envio de pulseira
+### 1.5 Centro de notificações + Telegram + Web Push + PDF de envio de pulseira (com ativação mediada)
 
-Proposta do Daniel em 26/09/2026, decisões já tomadas com ele (ver
-histórico de conversa para o raciocínio completo — resumo aqui):
+Proposta do Daniel em 26/09/2026, desenho fechado com ele ao longo de
+várias trocas (ver histórico de conversa para o raciocínio completo —
+resumo aqui). Contexto explícito do Daniel: arranca com um piloto numa
+população muito controlada, no hospital onde trabalha, e o desenho evolui
+à medida que surgirem necessidades reais — não é para sobre-construir já
+tudo, é para ter a arquitetura certa desde o início.
 
-**Problema:** hoje, quando um profissional atribui uma pulseira, nenhum
-superadmin sabe até entrar manualmente na app e verificar. Não escala —
-precisa de um aviso ativo.
+**Problema:** hoje, quando um profissional atribui uma pulseira (ou
+qualquer outro evento relevante acontece — revogação, reenvio, contacto,
+acesso break-glass), nenhum superadmin sabe até entrar manualmente na app
+e verificar. Não escala.
 
 **Decisões fechadas:**
-- **Conteúdo da notificação — minimalista, sem dado identificável do
-  paciente.** Só: qual profissional atribuiu, quando, e um link para a
-  vista de Segurança/Auditoria (já autenticada). Isto foi escolhido
-  precisamente para NÃO introduzir dado de saúde a passar pelo Telegram
-  — mantém o Telegram fora do registo de atividades de tratamento
-  (Art. 30º RGPD) e fora da lista de subprocessadores que precisam de
-  DPA, porque não leva consigo nenhum dado do paciente.
-- **Canal — os dois em paralelo:** Telegram (mais rápido de construir,
-  funciona em qualquer telemóvel) e Web Push nativo do PWA (não
-  acrescenta um terceiro novo, mas é mais trabalhoso — VAPID keys,
-  gestão de subscrições). Podem ser implementados em fases: Telegram
-  primeiro (valor imediato), Web Push depois.
-- **PDF de envio da pulseira — só logística, nunca dado clínico.**
-  Destinatário, código opaco da pulseira, instruções de uso, contacto de
-  suporte. Nenhum dado de `dados_nivel1` entra neste PDF — enviar
-  informação clínica por correio/email normal violaria a regra já
-  existente de cifra explícita em trânsito (`CLAUDE.md`, Regras não
-  negociáveis).
+
+1. **Centro de notificações dentro da app ("campanita").** Não basta um
+   toast que só aparece se a app já estiver aberta — precisa de persistir
+   entre sessões. Nova coleção Firestore `notificacoes`: cada evento
+   (pulseira atribuída/revogada/reenviada, contacto novo, acesso
+   break-glass, etc.) escreve um documento curto — `tipo`, `titulo`
+   breve, `criado_em`, `lida` (bool), `lida_por`. Ícone de sino no header
+   da vista de superadmin (`adminNav`), com contador de não lidas em
+   tempo real (`onSnapshot`) e um painel com a lista, cada item a apontar
+   para a vista relevante (Auditoria, Pacientes, etc.). Mesmo princípio
+   de conteúdo minimalista do Telegram aplica-se aqui: o resumo não leva
+   dado identificável do paciente — quem quiser o detalhe entra na vista
+   correspondente, já autenticado.
+2. **Telegram — minimalista, confirmado.** Só: "Pulseira atribuída" +
+   data/hora. Nenhum outro dado. Mantém o Telegram fora do registo de
+   atividades de tratamento (Art. 30º RGPD) e fora da lista de
+   subprocessadores que precisam de DPA, porque não leva consigo nenhum
+   dado do paciente.
+3. **Canal push — os dois em paralelo:** Telegram (mais rápido de
+   construir) e Web Push nativo do PWA (não acrescenta um terceiro novo,
+   mas é mais trabalhoso). Telegram primeiro, Web Push depois.
+4. **PDF de envio — só logística, ao estilo etiqueta de envio (Vinted
+   como referência visual).** Destinatário, código opaco da pulseira,
+   instruções de uso, contacto de suporte — o equivalente à etiqueta que
+   leva o pacote ao destino certo, nada mais. Os documentos do próprio
+   projeto (RGPD, política de privacidade, FAQ) vão dentro do envelope
+   em papel, à parte — são conteúdo estático, não gerado por paciente;
+   se ainda não existirem redigidos, é uma tarefa separada (jurídica, não
+   técnica) a fazer uma vez e reutilizar em todos os envios.
+5. **Ativação da pulseira — mediada pelo hospital, não self-service pela
+   família.** A pulseira chega inativa (dado clínico real vive na
+   própria pulseira via break-glass, nunca no PDF). Novo estado
+   intermédio em `pulseiras.estado`: `atribuida_pendente_ativacao` —
+   entre `nao_atribuida` e `ativa`. Fluxo: superadmin atribui + gera o
+   PDF de envio → pulseira fica `atribuida_pendente_ativacao` (não
+   funcional para break-glass) → quando o hospital confirma que a
+   família recebeu (telefone, ou outro canal já existente), o
+   profissional/superadmin carrega em "Ativar" (mesmo padrão já usado
+   para ativar/desativar contas) → pulseira passa a `ativa`. Decidido
+   deliberadamente contra um link/QR de auto-ativação pela família: sem
+   app de família (suspensa, ver "Pivô para produção"), não há forma de
+   verificar identidade de quem ativa, e um envelope interceptado no
+   correio poderia ativar a pulseira antes de chegar ao destino certo.
+   Para a escala do piloto (população controlada, canal hospital↔família
+   já ativo), a confirmação manual é mais segura e não acrescenta
+   trabalho significativo.
 
 **Desenho técnico (por implementar):**
 
@@ -133,33 +166,44 @@ precisa de um aviso ativo.
    `atribuirPulseira`/`solicitarPulseiraParaPaciente`
    (`docs/js/firestore-real.js`) escrevem diretamente no Firestore a
    partir do cliente. Para disparar os efeitos secundários (Telegram,
-   Web Push) sem expor segredos (bot token, chave VAPID privada) ao
-   cliente, isto passa a ser um novo endpoint `POST
-   /pulseiras/:id/atribuir` no Worker — mesma lógica de posse já
+   Web Push, escrita em `notificacoes`) sem expor segredos (bot token,
+   chave VAPID privada) ao cliente, isto passa a ser um novo endpoint
+   `POST /pulseiras/:id/atribuir` no Worker — mesma lógica de posse já
    existente (profissional só atribui a pacientes que criou; superadmin
-   sem restrição) — que escreve no Firestore E dispara os dois avisos.
-2. **Telegram:** secrets novos no Worker (`TELEGRAM_BOT_TOKEN`,
+   sem restrição) — que escreve no Firestore com `estado =
+   'atribuida_pendente_ativacao'` E dispara os avisos.
+2. **Novo endpoint `POST /pulseiras/:id/ativar`** (só superadmin/
+   profissional-criador) — troca `atribuida_pendente_ativacao` → `ativa`.
+   Pode ser uma escrita direta do cliente (não precisa de segredos), na
+   linha do que já existe para ativar/desativar contas.
+3. **Telegram:** secrets novos no Worker (`TELEGRAM_BOT_TOKEN`,
    `TELEGRAM_CHAT_ID` — grupo dos superadmins). Chamada simples a
    `api.telegram.org/bot<token>/sendMessage` depois de escrever no
    Firestore, com o conteúdo minimalista já decidido acima.
-3. **Web Push:** precisa de (a) par de chaves VAPID gerado uma vez, (b)
+4. **Centro de notificações:** escrita em `notificacoes` no mesmo
+   endpoint do Worker (para eventos que já passam por lá) ou diretamente
+   do cliente com as Firestore Rules já existentes (para eventos que já
+   são escritas diretas, como ativar/desativar) — não precisa de
+   segredos, ao contrário do Telegram/Web Push.
+5. **Web Push:** precisa de (a) par de chaves VAPID gerado uma vez, (b)
    nova coleção Firestore `push_subscriptions/{profissionalId}` a
    guardar a subscrição do browser de cada superadmin (feita no
    primeiro login, pedindo permissão de notificações), (c) o Worker a
    assinar e enviar o payload cifrado (RFC 8291) a cada subscrição
    guardada. Mais laborioso do que o Telegram — pode ficar para uma
-   segunda iteração deste item sem bloquear o Telegram.
-4. **PDF de envio:** novo botão na vista de pulseiras/lotes (ou no
-   momento de atribuição), gera um PDF simples — nome do destinatário,
-   código opaco da pulseira, instruções, contacto — a partir dos dados
-   já existentes em `pacientes`/`pulseiras`. Sem dependência do Worker,
-   pode ser gerado inteiramente no cliente.
+   segunda iteração sem bloquear o resto.
+6. **PDF de envio:** novo botão na vista de pulseiras/lotes (no momento
+   de atribuição), gera um PDF simples a partir dos dados já existentes
+   em `pacientes`/`pulseiras`. Sem dependência do Worker, gerado
+   inteiramente no cliente.
 
 **Depende de:** nada do bloco legal, desde que o conteúdo minimalista
 acima se mantenha — é precisamente essa escolha que evita abrir uma nova
 frente legal. Se no futuro se quiser incluir dado identificável do
-paciente no Telegram, isso teria de voltar a ser avaliado com o DPO antes
-de implementar.
+paciente no Telegram ou no centro de notificações, isso teria de voltar
+a ser avaliado com o DPO antes de implementar. A ativação self-service
+pela família fica registada como possibilidade futura, só se a app de
+família for retomada com um mecanismo de verificação de identidade.
 
 ### 1.4 A2 — Timeout de sessão por inatividade real (não por 5 min desde o login)
 
