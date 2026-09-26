@@ -201,6 +201,32 @@ pronto, deploy e migração ainda por fazer):**
   5. Testar "Gravar chip" num Android físico com Chrome antes de usar
      em qualquer pulseira real.
 
+**Deploy e migração — concluídos e validados em 26/09/2026, com um bug
+adicional encontrado e corrigido no caminho:**
+- `wrangler deploy` feito, as 4 contas de teste (ADMIN01, TESTE01,
+  TESTE02, UTIL01) reemitidas com `scripts/criar-conta.js` novo.
+- **Bug encontrado ao testar ao vivo:** `extrairCampos()` (função que
+  converte um documento REST do Firestore num objeto JS) não tratava o
+  tipo `arrayValue` — qualquer campo array (como `papeis` em
+  `profissionais/{id}`) vinha sempre `null`. Isto fazia com que
+  `POST /auth/login` assinasse todos os Custom Tokens com `papeis: []`,
+  independentemente do papel real da conta — o login em si funcionava
+  (a leitura do próprio documento só depende de `profissional_id`, não
+  de `papeis`), mas Dashboard/Pacientes/Contas/Auditoria ficavam presos
+  em "A carregar..." com `FirebaseError: Missing or insufficient
+  permissions`, porque `isSuperadmin()`/`isProfissional()` nas Rules
+  dependem de `papeis`. Corrigido (`converterValorFirestore()`, trata
+  `arrayValue` recursivamente), redeploy feito, confirmado ao vivo com
+  `ADMIN01` (dashboard, pacientes e contas carregam corretamente) e com
+  um acesso break-glass completo ao Nível 1 de "Maria Fictícia Teste"
+  (dados do utente, gestor do caso, sem erros na consola).
+- Estado atual: login por Custom Token, gestão de contas pela app, e
+  break-glass, todos confirmados a funcionar com o Worker em produção.
+  Falta só testar os 3 endpoints de gestão de contas (`POST
+  /admin/contas`, `PATCH /admin/contas/:id`, `POST
+  /admin/contas/:id/reset-pin`) a partir da vista "Contas", e o módulo
+  de gravação NFC num Android físico.
+
 **Pendente antes do primeiro paciente REAL — bloco legal/organizativo
 (NÃO se resolve com código, ver aviso logo no início deste documento):**
 - EIPD/DPIA formal.
