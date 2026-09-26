@@ -972,19 +972,39 @@ async function handleAdminResetPin(request, env, ctx, contaId) {
 // ({ fields: { campo: { stringValue: ... } } }) num objeto JS simples.
 // ---------------------------------------------------------------------
 
+// Converte um único "Value" do formato REST do Firestore
+// (https://firebase.google.com/docs/firestore/reference/rest/v1/Value)
+// para o valor JS equivalente — usada tanto para campos de topo como para
+// os elementos de um arrayValue (recursiva, para poderes ter arrays de
+// mapas, etc.).
+//
+// CORRIGIDO em 26/09/2026: faltava o caso "arrayValue" — qualquer campo
+// array (como `papeis` em profissionais/{id}) vinha sempre a null,
+// silenciosamente. Não tinha sido detetado até agora porque o único sítio
+// que lia `papeis` de um documento Firestore através de extrairCampos era
+// o endpoint novo POST /auth/login (a validação do break-glass em
+// validarPapelUtilizadorEPin lê `papeis` diretamente das claims do ID
+// token, nunca via extrairCampos) — por isso todas as contas entravam com
+// `papeis: []` no Custom Token, e qualquer leitura que dependesse de
+// isSuperadmin()/isProfissional() nas Firestore Rules falhava com
+// "Missing or insufficient permissions", mesmo com login bem sucedido.
+function converterValorFirestore(v) {
+  if ("stringValue" in v) return v.stringValue;
+  if ("doubleValue" in v) return v.doubleValue;
+  if ("integerValue" in v) return Number(v.integerValue);
+  if ("booleanValue" in v) return v.booleanValue;
+  if ("timestampValue" in v) return v.timestampValue;
+  if ("nullValue" in v) return null;
+  if ("mapValue" in v) return extrairCampos({ fields: v.mapValue.fields || {} });
+  if ("arrayValue" in v) return (v.arrayValue.values || []).map(converterValorFirestore);
+  return null;
+}
+
 function extrairCampos(doc) {
   const out = {};
   const fields = doc.fields || {};
   Object.keys(fields).forEach((k) => {
-    const v = fields[k];
-    if ("stringValue" in v) out[k] = v.stringValue;
-    else if ("doubleValue" in v) out[k] = v.doubleValue;
-    else if ("integerValue" in v) out[k] = Number(v.integerValue);
-    else if ("booleanValue" in v) out[k] = v.booleanValue;
-    else if ("timestampValue" in v) out[k] = v.timestampValue;
-    else if ("nullValue" in v) out[k] = null;
-    else if ("mapValue" in v) out[k] = extrairCampos({ fields: v.mapValue.fields || {} });
-    else out[k] = null;
+    out[k] = converterValorFirestore(fields[k]);
   });
   return out;
 }
