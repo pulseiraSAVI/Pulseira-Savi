@@ -93,9 +93,19 @@ function viewAdminContas(root) {
       btnEditar.textContent = "Editar";
       btnEditar.style.marginRight = "6px";
       btnEditar.addEventListener("click", function () {
+        // BUG corrigido (26/09/2026, teste autónomo do roadmap 1.1):
+        // chamar só renderFormEditar(p) aqui não fazia nada — a linha
+        // <tr id="form-editar-{id}"> só é criada dentro do forEach de
+        // render(), e só quando idEmEdicao já apontava para este `p`
+        // ANTES desse forEach correr. Na primeira vez que se clicava em
+        // "Editar", idEmEdicao ainda era null quando a tabela foi
+        // construída, portanto o elemento não existia no DOM e
+        // renderFormEditar() saía logo a seguir (if (!el) return;) sem
+        // mostrar nada. Chamar render() em vez disso reconstrói a tabela
+        // já com idEmEdicao atualizado, criando a linha do formulário.
         idEmEdicao = idEmEdicao === p.id ? null : p.id;
         mostrarFormCriar = false;
-        renderFormEditar(p);
+        render();
       });
       tdAcao.appendChild(btnEditar);
 

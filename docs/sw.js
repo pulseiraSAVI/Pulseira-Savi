@@ -33,8 +33,16 @@
  * de contas (criar/editar/reiniciar PIN) a partir da vista de superadmin
  * "Contas"; gravação de chips NFC a partir da vista "Pulseiras e lotes"
  * (Web NFC API, só Chrome/Android).
+ *
+ * v11 (26/09/2026): correção de bug encontrado ao testar autonomamente o
+ * roadmap 1.1 — o botão "Editar" em Contas nunca mostrava o formulário
+ * (chamava renderFormEditar() diretamente sobre uma linha de tabela que
+ * só é criada dentro de render(), e só quando idEmEdicao já apontava
+ * para a conta certa ANTES da tabela ser construída — na prática, nunca
+ * na primeira vez que se clicava). Corrigido em admin-contas.js para
+ * chamar render() em vez disso.
  */
-const SW_VERSION = "savi-v10";
+const SW_VERSION = "savi-v11";
 const CACHE_NAME = `savi-cache-${SW_VERSION}`;
 
 // Caminhos relativos ao scope do service worker (raiz de docs/), para
