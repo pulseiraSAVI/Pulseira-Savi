@@ -227,6 +227,43 @@ adicional encontrado e corrigido no caminho:**
   /admin/contas/:id/reset-pin`) a partir da vista "Contas", e o módulo
   de gravação NFC num Android físico.
 
+**Teste autónomo dos 3 endpoints de gestão de contas — feito e validado
+em 26/09/2026, com 2 bugs reais encontrados e corrigidos no caminho:**
+- Testados de ponta a ponta (via navegador, sessão `ADMIN01`): `POST
+  /admin/contas` (criada conta de teste "Conta Teste Autonoma"/AUTO01,
+  PIN gerado devolvido uma única vez), `POST
+  /admin/contas/:id/reset-pin` (novo PIN gerado, testado a autenticar
+  com sucesso), e `PATCH /admin/contas/:id` (papel adicionado,
+  persistido). Conta de teste desativada (`ativo: false`) no fim — sem
+  endpoint de eliminação, por desenho (ver 1.1 do roadmap), fica
+  registada como inativa em vez de apagada.
+- **Bug 1 (UI):** o botão "Editar" em Contas nunca mostrava o
+  formulário — `admin-contas.js` chamava `renderFormEditar(p)`
+  diretamente, mas a linha `<tr id="form-editar-{id}">` só é criada
+  dentro do `forEach` de `render()`, e só quando `idEmEdicao` já
+  apontava para essa conta ANTES de a tabela ser construída — na
+  prática, nunca da primeira vez que se clicava. Corrigido a chamar
+  `render()` em vez disso.
+- **Bug 2 (service worker):** `sw.js` `install()` usava
+  `cache.addAll(ASSETS)`, que aceita uma resposta já presente no cache
+  HTTP normal do browser (não o Cache Storage do SW) mesmo com
+  `SW_VERSION` incrementado — se o browser tivesse pedido aquele URL há
+  menos de `max-age` (600s no GitHub Pages) momentos antes do deploy, o
+  precache ficava com ficheiros antigos apesar da versão nova. Foi isto
+  que causou uma falsa suspeita de "GitHub Pages a servir conteúdo
+  desatualizado" durante este teste — não era a CDN, era o precache do
+  SW a herdar uma resposta stale do cache HTTP local. Corrigido a pedir
+  cada asset com `{cache: "reload"}`, forçando validação real ao
+  servidor. `sw.js` → `savi-v11`.
+- **Achado a decidir, não corrigido nesta sessão:** a vista "Contas"
+  mostra uma 6ª/5ª conta inesperada, `nome = "Pulseira.SAVI"`, `Nº de
+  Ordem = "1234M"` (coincide exatamente com o PIN documentado da conta
+  `ADMIN01`), papéis `Superadmin` + auditor, `ativo`. Não consta de
+  nenhuma lista de contas conhecida deste documento (só ADMIN01,
+  TESTE01, TESTE02, UTIL01 estavam documentadas). Não foi tocada nem
+  investigada a fundo — decidir com o Daniel se é uma conta legítima
+  (ex.: criada manualmente para outro fim) ou um resíduo a desativar.
+
 **Pendente antes do primeiro paciente REAL — bloco legal/organizativo
 (NÃO se resolve com código, ver aviso logo no início deste documento):**
 - EIPD/DPIA formal.
