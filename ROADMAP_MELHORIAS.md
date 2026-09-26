@@ -14,6 +14,7 @@
 | 1.1 Gestão de contas desde a app | ✅ Feito, testado e validado em produção |
 | 1.2 Recuperação/reset de PIN + reenvio | ⏸️ Bloqueado por #17 (Resend) |
 | 1.3 Gravação de pulseiras NFC | 🟡 Código pronto — falta testar em Android físico |
+| 1.5 Notificações em tempo real (Telegram + Web Push) + PDF de envio | ⬜ Desenhado em 26/09/2026, por implementar |
 | #17 Configurar Resend | ⬜ Por fazer |
 | A2 (timeout de sessão por inatividade real) | ⬜ Por começar |
 | 2.1–2.4 (bloco legal/regulatório) | ⬜ Por fazer — não se resolve com código |
@@ -96,6 +97,69 @@ QR continua a ser gerado/impresso à parte (fora de âmbito, mantém-se
 assim).
 
 **Depende de:** nada do bloco legal. Só depende de acesso a um Android.
+
+### 1.5 Notificações em tempo real de eventos de superadmin (Telegram + Web Push) + PDF de envio de pulseira
+
+Proposta do Daniel em 26/09/2026, decisões já tomadas com ele (ver
+histórico de conversa para o raciocínio completo — resumo aqui):
+
+**Problema:** hoje, quando um profissional atribui uma pulseira, nenhum
+superadmin sabe até entrar manualmente na app e verificar. Não escala —
+precisa de um aviso ativo.
+
+**Decisões fechadas:**
+- **Conteúdo da notificação — minimalista, sem dado identificável do
+  paciente.** Só: qual profissional atribuiu, quando, e um link para a
+  vista de Segurança/Auditoria (já autenticada). Isto foi escolhido
+  precisamente para NÃO introduzir dado de saúde a passar pelo Telegram
+  — mantém o Telegram fora do registo de atividades de tratamento
+  (Art. 30º RGPD) e fora da lista de subprocessadores que precisam de
+  DPA, porque não leva consigo nenhum dado do paciente.
+- **Canal — os dois em paralelo:** Telegram (mais rápido de construir,
+  funciona em qualquer telemóvel) e Web Push nativo do PWA (não
+  acrescenta um terceiro novo, mas é mais trabalhoso — VAPID keys,
+  gestão de subscrições). Podem ser implementados em fases: Telegram
+  primeiro (valor imediato), Web Push depois.
+- **PDF de envio da pulseira — só logística, nunca dado clínico.**
+  Destinatário, código opaco da pulseira, instruções de uso, contacto de
+  suporte. Nenhum dado de `dados_nivel1` entra neste PDF — enviar
+  informação clínica por correio/email normal violaria a regra já
+  existente de cifra explícita em trânsito (`CLAUDE.md`, Regras não
+  negociáveis).
+
+**Desenho técnico (por implementar):**
+
+1. **Mover a atribuição de pulseira para o Worker.** Hoje
+   `atribuirPulseira`/`solicitarPulseiraParaPaciente`
+   (`docs/js/firestore-real.js`) escrevem diretamente no Firestore a
+   partir do cliente. Para disparar os efeitos secundários (Telegram,
+   Web Push) sem expor segredos (bot token, chave VAPID privada) ao
+   cliente, isto passa a ser um novo endpoint `POST
+   /pulseiras/:id/atribuir` no Worker — mesma lógica de posse já
+   existente (profissional só atribui a pacientes que criou; superadmin
+   sem restrição) — que escreve no Firestore E dispara os dois avisos.
+2. **Telegram:** secrets novos no Worker (`TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_CHAT_ID` — grupo dos superadmins). Chamada simples a
+   `api.telegram.org/bot<token>/sendMessage` depois de escrever no
+   Firestore, com o conteúdo minimalista já decidido acima.
+3. **Web Push:** precisa de (a) par de chaves VAPID gerado uma vez, (b)
+   nova coleção Firestore `push_subscriptions/{profissionalId}` a
+   guardar a subscrição do browser de cada superadmin (feita no
+   primeiro login, pedindo permissão de notificações), (c) o Worker a
+   assinar e enviar o payload cifrado (RFC 8291) a cada subscrição
+   guardada. Mais laborioso do que o Telegram — pode ficar para uma
+   segunda iteração deste item sem bloquear o Telegram.
+4. **PDF de envio:** novo botão na vista de pulseiras/lotes (ou no
+   momento de atribuição), gera um PDF simples — nome do destinatário,
+   código opaco da pulseira, instruções, contacto — a partir dos dados
+   já existentes em `pacientes`/`pulseiras`. Sem dependência do Worker,
+   pode ser gerado inteiramente no cliente.
+
+**Depende de:** nada do bloco legal, desde que o conteúdo minimalista
+acima se mantenha — é precisamente essa escolha que evita abrir uma nova
+frente legal. Se no futuro se quiser incluir dado identificável do
+paciente no Telegram, isso teria de voltar a ser avaliado com o DPO antes
+de implementar.
 
 ### 1.4 A2 — Timeout de sessão por inatividade real (não por 5 min desde o login)
 
@@ -205,13 +269,16 @@ Fica registado, não iniciar agora:
    de acesso, que já é regra não negociável e ainda não está ativa.
 3. **Testar 1.3 (gravação NFC) num Android físico** — código já pronto,
    só falta esta validação; sem dependências do resto.
-4. A2 (timeout de sessão por inatividade real) — pode ser escrito em
+4. **1.5 (notificações Telegram + Web Push + PDF de envio)** — desenho já
+   fechado com o Daniel em 26/09; começar pelo Telegram (mais rápido) e
+   pelo PDF (sem dependências), Web Push pode vir a seguir.
+5. A2 (timeout de sessão por inatividade real) — pode ser escrito em
    paralelo, mas o deploy espera por um namespace Workers KV a criar
    pelo Daniel.
-5. Arrancar em paralelo 2.2 (documentação RGPD/termo) e 2.3 (parecer
+6. Arrancar em paralelo 2.2 (documentação RGPD/termo) e 2.3 (parecer
    sobre dispositivo médico) — são os que mais tempo de terceiros
    consomem, por isso quanto mais cedo entrarem na fila, melhor.
-6. 2.4 (comissão de ética) — depois de 2.2/2.3 terem material para anexar.
-7. 2.1 (ISO 27001) — gap analysis pode começar já, certificação fica para
+7. 2.4 (comissão de ética) — depois de 2.2/2.3 terem material para anexar.
+8. 2.1 (ISO 27001) — gap analysis pode começar já, certificação fica para
    depois do piloto.
-8. Bloco 3 (marca) — sem prazo, retomar quando o resto estiver estável.
+9. Bloco 3 (marca) — sem prazo, retomar quando o resto estiver estável.
