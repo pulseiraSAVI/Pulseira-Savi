@@ -179,16 +179,17 @@ ecrãs) e é, de forma independente, uma falta de validação de schema.
 consentimento`, `estado_verificacao`) passaram a ser escapados como os
 restantes nesta sessão.
 
-**Estado (26/09/2026): CORRIGIDO NO CÓDIGO, PENDENTE DE DEPLOY.**
+**Estado (26/09/2026): CORRIGIDO E VALIDADO EM PRODUÇÃO.**
 `backend/firestore.rules` ganhou `estadoConsentimentoValido()` (aplicada
 a `pacientes`, superadmin incluído — não só profissional) e
 `dadosNivel1Validos()` (aplicada a `dados_nivel1`, valida
 `estado_verificacao` e `limitacao_terapeutica`). A regra de leitura de
 `pacientes` foi separada da de update/delete para a validação de
 conteúdo não interferir com a verificação estática de list queries (a
-mesma técnica já usada para o bug de list de 25/09). Falta só
-`firebase deploy --only firestore:rules` — ver checklist no final deste
-documento.
+mesma técnica já usada para o bug de list de 25/09). Deploy feito
+(`firebase deploy --only firestore:rules`) e confirmado ao vivo: registo
+de uma nova paciente fictícia ("Barbara Ficticia, teste") pela conta
+`TESTE01`, com `estado_consentimento` válido, sem qualquer erro de regra.
 
 ### A2 — `auth_time` não serve para medir inatividade
 
@@ -218,13 +219,15 @@ Aceitável a 50 pacientes (Fase 1), mas: (a) não escala, e (b) mantinha
 temporariamente na memória do Worker os dados administrativos de TODOS
 os pacientes só para responder a um pedido sobre um.
 
-**Estado (26/09/2026): CORRIGIDO NO CÓDIGO, PENDENTE DE DEPLOY.** Passa a
-usar uma query estruturada (`runQuery`) com filtro composto em
+**Estado (26/09/2026): CORRIGIDO E VALIDADO EM PRODUÇÃO.** Passa a usar
+uma query estruturada (`runQuery`) com filtro composto em
 `data_nascimento` + `sexo` (igualdade em dois campos não exige índice
 composto no Firestore) — reduz o conjunto candidato a um punhado de
 documentos antes de comparar `nome` em memória (essa comparação continua
 em JS, porque é case-insensitive/trim, algo que uma `EQUAL` do Firestore
-não faz). Falta só `wrangler deploy` — ver checklist no final.
+não faz). Deploy feito (`wrangler deploy`) e confirmado ao vivo: acesso
+por identidade a "Barbara Ficticia, teste" (nome + data de nascimento +
+sexo) devolveu `200` com os dados completos.
 
 ---
 
@@ -253,10 +256,13 @@ não faz). Falta só `wrangler deploy` — ver checklist no final.
   (`nivel1-form.js`, `input type="file"`) — aceita qualquer PDF/imagem
   sem limite de tamanho explícito no cliente; as Storage Rules também não
   impunham `request.resource.size` nem `contentType`. **Estado
-  (26/09/2026): CORRIGIDO NO CÓDIGO, PENDENTE DE DEPLOY** —
+  (26/09/2026): CORRIGIDO E IMPLANTADO** —
   `backend/storage.rules` passou a exigir `request.resource.size < 10 *
   1024 * 1024 && request.resource.contentType.matches('application/
-  pdf|image/.*')` na escrita. Falta `firebase deploy --only storage`.
+  pdf|image/.*')` na escrita. Deploy feito (`firebase deploy --only
+  storage`); não retestado com um upload real nesta sessão (não bloqueia
+  nada que já estivesse a funcionar, só passa a rejeitar ficheiros fora
+  do limite).
 
 ## Achados de risco baixo (higiene de código — corrigidos nesta sessão)
 
