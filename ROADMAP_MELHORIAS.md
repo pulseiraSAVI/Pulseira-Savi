@@ -197,6 +197,113 @@ e verificar. Não escala.
    em `pacientes`/`pulseiras`. Sem dependência do Worker, gerado
    inteiramente no cliente.
 
+**Esquema de dados (schema) — pronto a implementar, ainda NÃO aplicado a
+`backend/firestore.rules` nem à app.** Fica aqui em detalhe para não haver
+nenhuma decisão por tomar quando chegar a altura de escrever o código —
+só falta transcrever. As mudanças a `pulseiras` e as regras têm de ser
+implantadas **na mesma vez** que o novo endpoint do Worker, nunca antes
+— senão a app fica sem forma de atribuir pulseiras a meio da transição
+(ver nota de ordem de deploy no fim desta secção).
+
+*Coleção nova `notificacoes/{notificacaoId}`:*
+```
+tipo: string            // 'pulseira_atribuida' | 'pulseira_ativada' |
+                         // 'pulseira_revogada' | 'reenvio' | 'contacto_novo' |
+                         // 'acesso_breakglass' — enum fechado, validado nas Rules
+titulo: string           // curto, minimalista, nunca nome do paciente
+                         // ex.: "TESTE01 atribuiu uma pulseira"
+referencia_id: string|null // id do documento relevante (pulseiraId, contaId,
+                            // acessoId...) para o link da campainha navegar lá
+criado_por_id: string|null // profissional_id de quem gerou o evento, ou null
+                            // se foi o próprio Worker/sistema
+criado_em: string (ISO 8601)
+lida: boolean            // default false
+lida_por_id: string|null
+lida_em: string|null
+```
+
+*Regras Firestore para `notificacoes` (esboço):*
+```
+function tipoNotificacaoValido(dados) {
+  return dados.tipo in ['pulseira_atribuida', 'pulseira_ativada',
+    'pulseira_revogada', 'reenvio', 'contacto_novo', 'acesso_breakglass'];
+}
+
+match /notificacoes/{notificacaoId} {
+  // Leitura: qualquer superadmin (é o público-alvo deste centro de
+  // notificações — não existe por papel, é uma ferramenta de gestão).
+  allow read: if isSuperadmin();
+
+  // Marcar como lida: superadmin só pode tocar em lida/lida_por_id/lida_em,
+  // nunca reescrever o resto do documento (evita branquear o conteúdo de
+  // um evento já registado).
+  allow update: if isSuperadmin() &&
+    request.resource.data.diff(resource.data).affectedKeys()
+      .hasOnly(['lida', 'lida_por_id', 'lida_em']);
+
+  // Criação: superadmin (eventos que já são escrita direta, como
+  // ativar/desativar) ou o Worker via service account (eventos que
+  // passam por lá, como atribuir pulseira — nesse caso a escrita vem
+  // com uma identidade de service account, fora do alcance destas
+  // regras, tal como já acontece com `acessos`).
+  allow create: if isSuperadmin() && tipoNotificacaoValido(request.resource.data);
+
+  allow delete: if false; // histórico não se apaga, só se marca como lida
+}
+```
+
+*Alteração a `pulseiras.estado` — novo valor `atribuida_pendente_ativacao`:*
+Enum completo passa a ser: `nao_atribuida` | `atribuida_pendente_ativacao`
+| `ativa` | `perdida` | `desativada` | `substituida`. Precisa de uma
+função de validação de conteúdo (mesmo princípio do achado A1):
+```
+function estadoPulseiraValido(estado) {
+  return estado in ['nao_atribuida', 'atribuida_pendente_ativacao',
+    'ativa', 'perdida', 'desativada', 'substituida'];
+}
+```
+E a regra de `update` do profissional em `pulseiras` passa a cobrir dois
+casos distintos — a atribuição deixa de ser feita pelo cliente (migra
+para o Worker, ver ponto 1 acima), mas a ativação continua a ser escrita
+direta, por não precisar de segredos:
+```
+allow update: if isProfissional() &&
+  estadoPulseiraValido(request.resource.data.estado) &&
+  resource.data.estado == 'atribuida_pendente_ativacao' &&
+  request.resource.data.estado == 'ativa' &&
+  ehCriadorDoPaciente(resource.data.paciente_id);
+```
+(A regra atual, que permite ao profissional atribuir diretamente quando
+`estado == 'nao_atribuida'`, é removida nesta mesma alteração — passa a
+ser exclusiva do Worker, com service account.)
+
+*Coleção nova `push_subscriptions/{profissionalId}` (fase Web Push, mais
+tarde):*
+```
+endpoint: string        // URL de push do browser
+keys: { p256dh: string, auth: string }
+criado_em: string (ISO 8601)
+```
+```
+match /push_subscriptions/{profissionalId} {
+  allow read, write: if autenticado() &&
+    request.auth.token.profissional_id == profissionalId;
+  // O Worker lê todas as subscrições via service account para enviar o
+  // push a todos os superadmins — fora do alcance destas regras.
+}
+```
+
+**Ordem de deploy obrigatória, quando chegar a altura (mesmo padrão do
+checklist de migração de contas já usado em 26/09):**
+1. Deploy das `firestore.rules` novas (`notificacoes`, `estadoPulseiraValido`,
+   regra de ativação) — não quebra nada ainda, só acrescenta.
+2. Deploy do Worker com os dois endpoints novos (`/pulseiras/:id/atribuir`,
+   `/pulseiras/:id/ativar`) e os secrets do Telegram já configurados.
+3. Só depois disto, atualizar `docs/js/firestore-real.js`/`admin-tokens.js`
+   para deixar de escrever `pulseiras` diretamente na atribuição e passar
+   a chamar o Worker — inverter esta ordem deixaria a app sem forma de
+   atribuir pulseiras durante a janela entre passos.
+
 **Depende de:** nada do bloco legal, desde que o conteúdo minimalista
 acima se mantenha — é precisamente essa escolha que evita abrir uma nova
 frente legal. Se no futuro se quiser incluir dado identificável do
