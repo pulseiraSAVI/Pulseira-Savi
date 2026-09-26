@@ -29,7 +29,7 @@ lista solta.
 
 ## Bloco 1 — Produto / App
 
-### 1.1 Gestão de contas desde a app (CRUD + papéis)
+### 1.1 Gestão de contas desde a app (CRUD + papéis) — ✅ testado e validado em 26/09/2026
 
 Hoje, criar/editar/eliminar contas passa por `scripts/criar-conta.js`
 (fora do cliente, de propósito, porque exige Admin SDK/custom claims — ver
