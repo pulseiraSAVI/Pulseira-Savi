@@ -1,10 +1,22 @@
 # SAVI — Roadmap de melhorias (pós-piloto técnico)
 
-> Criado em 25/09/2026. Complementa `CLAUDE.md` — não o substitui. `CLAUDE.md`
-> continua a ser a fonte da verdade sobre o estado atual da infraestrutura;
-> este documento organiza o que falta a partir daqui, por bloco e por
-> prioridade. Itens que passarem a decisão fechada ou a trabalho em curso
-> devem migrar para `CLAUDE.md`.
+> Criado em 25/09/2026, atualizado em 26/09/2026. Complementa `CLAUDE.md` —
+> não o substitui. `CLAUDE.md` continua a ser a fonte da verdade sobre o
+> estado atual da infraestrutura (inclui o detalhe técnico de cada correção
+> e teste); este documento organiza o que falta a partir daqui, por bloco e
+> por prioridade. Itens que passarem a decisão fechada ou a trabalho em
+> curso devem migrar para `CLAUDE.md`.
+
+## Estado num relance (26/09/2026)
+
+| Item | Estado |
+|---|---|
+| 1.1 Gestão de contas desde a app | ✅ Feito, testado e validado em produção |
+| 1.2 Recuperação/reset de PIN + reenvio | ⏸️ Bloqueado por #17 (Resend) |
+| 1.3 Gravação de pulseiras NFC | 🟡 Código pronto — falta testar em Android físico |
+| #17 Configurar Resend | ⬜ Por fazer |
+| A2 (timeout de sessão por inatividade real) | ⬜ Por começar |
+| 2.1–2.4 (bloco legal/regulatório) | ⬜ Por fazer — não se resolve com código |
 
 ## Como ler isto
 
@@ -31,28 +43,24 @@ lista solta.
 
 ### 1.1 Gestão de contas desde a app (CRUD + papéis) — ✅ testado e validado em 26/09/2026
 
-Hoje, criar/editar/eliminar contas passa por `scripts/criar-conta.js`
-(fora do cliente, de propósito, porque exige Admin SDK/custom claims — ver
-`CLAUDE.md`). Isto foi aceitável para um punhado de contas de teste; não
-escala para o piloto real (50 pacientes, várias contas de profissional e
-utilizador).
+Concluído: `POST /admin/contas` (criar), `PATCH /admin/contas/:id`
+(editar nome/papéis/dados), `POST /admin/contas/:id/reset-pin` (reiniciar
+PIN) implementados no Worker e testados de ponta a ponta a partir da vista
+"Contas" — criação de conta com PIN gerado, reset de PIN com novo login
+confirmado, e edição de papéis persistida. Ativar/desativar continua a ser
+escrita direta no Firestore, como já estava.
 
-O que falta:
-- Decidir onde vive a lógica de Admin SDK que hoje está no script:
-  Cloudflare Worker novo (endpoint `admin/contas`) é o candidato natural,
-  já que o Worker já tem acesso de service account e já é o único
-  componente autorizado a falar com o Admin SDK neste projeto.
-- UI de superadmin: criar conta (nome, nº de Ordem, papel(éis), PIN
-  inicial), editar (nome, papéis, ativar/desativar — isto já existe),
-  eliminar conta (com confirmação e efeito em cascata a decidir: o que
-  acontece aos pacientes que essa conta criou?).
-- Decisão em aberto do próprio `CLAUDE.md` que isto obriga a fechar: como
-  se registam contas novas — superadmin cria diretamente, ou o
-  profissional pede e o superadmin aprova. Enquanto não decidido, manter
-  só criação direta (é o que já está documentado).
+No caminho deste teste, 2 bugs reais foram encontrados e corrigidos (ver
+`CLAUDE.md` para o detalhe técnico): o botão "Editar" nunca mostrava o
+formulário (erro de sequência de render), e o service worker podia
+precachear ficheiros desatualizados logo após um deploy (corrigido a
+forçar `{cache: "reload"}`). `sw.js` → `savi-v11`.
 
-**Depende de:** nada tecnicamente novo — é a extensão natural do que já
-existe no Worker. Não depende do bloco legal.
+**Continua deliberadamente fora de âmbito:** eliminar conta — o efeito em
+cascata sobre pacientes/acessos já criados por essa conta ainda não foi
+decidido. Também por decidir: como se registam contas novas (superadmin
+cria diretamente vs. profissional pede e superadmin aprova) — por agora
+mantém-se só criação direta.
 
 ### 1.2 Recuperação de PIN + reset pelo superadmin
 
@@ -70,30 +78,38 @@ Duas necessidades distintas, não confundir:
   depende de Resend estar configurado (#17) — este item fica portanto
   **bloqueado por #17**, não em paralelo com ele.
 
-### 1.3 Módulo de gravação de pulseiras NFC
+### 1.3 Módulo de gravação de pulseiras NFC — 🟡 código pronto, falta testar em hardware
 
-Resposta direta à pergunta: **sim**, dá para gravar chips NTAG213 a
-partir de um telemóvel Android com a **Web NFC API**, correndo no Chrome
-para Android — é exatamente a tecnologia que `CLAUDE.md` já tinha
-decidido para isto ("Web NFC API (Chrome/Android)... Não há alternativa
-em iOS; assumir que a gravação é feita sempre num Android"). Não é uma
-decisão nova, é destravar um item que já estava no stack técnico mas
-fora de âmbito da iteração anterior.
+Implementado: botão "Gravar chip" na vista "Pulseiras / Lotes"
+(`admin-tokens.js`), Web NFC API (`NDEFReader`, Chrome/Android), grava
+apenas o token opaco já existente — nunca dado clínico, como manda a
+regra não negociável.
 
-O que falta construir:
-- Ecrã/ferramenta interna (só acessível a superadmin/profissional, nunca
-  ao papel utilizador) que: gera um token opaco novo, grava **apenas
-  esse token** no chip via NDEF (nunca dado clínico — regra não
-  negociável já existente), e cria o registo correspondente em
-  `pulseiras` com `estado = 'inativa'` até ser associado a um paciente.
-- Fluxo de associação pulseira↔paciente (parte disto já existe do lado
-  de `solicitarPulseiraParaPaciente`, falta o lado da gravação física).
-- Testar em, pelo menos, dois modelos de Android diferentes — a Web NFC
-  API tem variação de suporte entre fabricantes/versões do Chrome.
-- QR continua a ser gerado/impresso à parte (já fora de âmbito, mantém-se
-  assim).
+**O que falta, e é o único bloqueante real deste item:** testar em
+hardware físico. Não há Android disponível neste ambiente de
+desenvolvimento — isto só pode ser feito pelo Daniel, num telemóvel real
+com Chrome, antes de gravar qualquer pulseira que vá para um paciente
+(fictício ou real). Sugestão: testar em pelo menos dois modelos/versões
+de Android diferentes, dado que o suporte a Web NFC varia por fabricante.
 
-**Depende de:** nada do bloco legal. Pode avançar em paralelo.
+QR continua a ser gerado/impresso à parte (fora de âmbito, mantém-se
+assim).
+
+**Depende de:** nada do bloco legal. Só depende de acesso a um Android.
+
+### 1.4 A2 — Timeout de sessão por inatividade real (não por 5 min desde o login)
+
+Achado da auditoria de segurança, ainda não corrigido. Hoje o timeout de
+5 minutos (`CLAUDE.md`, Fluxo de acesso) é medido a partir do `auth_time`
+do token, não de inatividade real — um utilizador ativo pode ser
+desligado a meio de uma emergência, e um token roubado pode continuar
+válido até ao fim da janela mesmo sem uso. Correção desenhada mas não
+implementada: um registo de sessão do lado do servidor (Workers KV ou
+Durable Object) com TTL renovado a cada pedido ao Worker.
+
+**Depende de:** o Daniel criar um namespace Workers KV nas credenciais
+Cloudflare dele antes do deploy — o código pode ser escrito já, mas o
+deploy final precisa dessa peça.
 
 ---
 
@@ -181,18 +197,21 @@ Fica registado, não iniciar agora:
 
 ---
 
-## Prioridade sugerida (não vinculativa)
+## Prioridade sugerida (não vinculativa, atualizada em 26/09/2026)
 
-1. Fechar 1.1 (gestão de contas) — desbloqueia o piloto a crescer além
-   das poucas contas de teste manuais.
-2. Configurar Resend (#17, já em curso) — desbloqueia 1.2 (reset de PIN
-   com reenvio) e a notificação obrigatória de acesso, que já é regra não
-   negociável e ainda não está ativa.
-3. 1.3 (gravação NFC) — em paralelo com o acima, sem dependências.
-4. Arrancar em paralelo 2.2 (documentação RGPD/termo) e 2.3 (parecer
+1. ~~Fechar 1.1 (gestão de contas)~~ — ✅ feito e validado.
+2. **Configurar Resend (#17)** — passa a ser o item técnico nº1 em aberto:
+   desbloqueia 1.2 (reset de PIN com reenvio) e a notificação obrigatória
+   de acesso, que já é regra não negociável e ainda não está ativa.
+3. **Testar 1.3 (gravação NFC) num Android físico** — código já pronto,
+   só falta esta validação; sem dependências do resto.
+4. A2 (timeout de sessão por inatividade real) — pode ser escrito em
+   paralelo, mas o deploy espera por um namespace Workers KV a criar
+   pelo Daniel.
+5. Arrancar em paralelo 2.2 (documentação RGPD/termo) e 2.3 (parecer
    sobre dispositivo médico) — são os que mais tempo de terceiros
    consomem, por isso quanto mais cedo entrarem na fila, melhor.
-5. 2.4 (comissão de ética) — depois de 2.2/2.3 terem material para anexar.
-6. 2.1 (ISO 27001) — gap analysis pode começar já, certificação fica para
+6. 2.4 (comissão de ética) — depois de 2.2/2.3 terem material para anexar.
+7. 2.1 (ISO 27001) — gap analysis pode começar já, certificação fica para
    depois do piloto.
-7. Bloco 3 (marca) — sem prazo, retomar quando o resto estiver estável.
+8. Bloco 3 (marca) — sem prazo, retomar quando o resto estiver estável.
