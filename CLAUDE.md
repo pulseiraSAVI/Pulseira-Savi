@@ -255,14 +255,11 @@ em 26/09/2026, com 2 bugs reais encontrados e corrigidos no caminho:**
   SW a herdar uma resposta stale do cache HTTP local. Corrigido a pedir
   cada asset com `{cache: "reload"}`, forçando validação real ao
   servidor. `sw.js` → `savi-v11`.
-- **Achado a decidir, não corrigido nesta sessão:** a vista "Contas"
-  mostra uma 6ª/5ª conta inesperada, `nome = "Pulseira.SAVI"`, `Nº de
-  Ordem = "1234M"` (coincide exatamente com o PIN documentado da conta
-  `ADMIN01`), papéis `Superadmin` + auditor, `ativo`. Não consta de
-  nenhuma lista de contas conhecida deste documento (só ADMIN01,
-  TESTE01, TESTE02, UTIL01 estavam documentadas). Não foi tocada nem
-  investigada a fundo — decidir com o Daniel se é uma conta legítima
-  (ex.: criada manualmente para outro fim) ou um resíduo a desativar.
+- **Conta `Pulseira.SAVI` (Nº de Ordem `1234M`) — esclarecido com o
+  Daniel em 26/09/2026:** era legítima, a primeira conta superadmin
+  criada (antes de `ADMIN01` ficar estabelecida como a conta principal
+  do dia a dia). Desativada a pedido dele — fica registada como
+  `inativo`, não eliminada (sem endpoint de eliminação, por desenho).
 
 **Pendente antes do primeiro paciente REAL — bloco legal/organizativo
 (NÃO se resolve com código, ver aviso logo no início deste documento):**
