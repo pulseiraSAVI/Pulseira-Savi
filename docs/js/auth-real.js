@@ -1,43 +1,35 @@
 /* auth-real.js
  * SAVI — substitui auth-sim.js por identificação real: Firebase Auth
- * (email/password interno derivado do nº de Ordem) + leitura do próprio
- * documento em `profissionais/{uid}` (permitido por firestore.rules:
- * "Cada conta pode ler o seu próprio documento").
+ * (via Custom Token) + leitura do próprio documento em
+ * `profissionais/{uid}` (permitido por firestore.rules: "Cada conta pode
+ * ler o seu próprio documento").
  *
  * Mantém exatamente a mesma interface global `window.authSim` que
  * auth-sim.js — identificar/escolherPapel deixam de ser síncronas (agora
- * devolvem Promise, porque falam com Firebase Auth/Firestore a sério),
- * mas o resto (getSessao, sessaoAtiva, logout, onExpirar, temContaPendente)
+ * devolvem Promise, porque falam com o Worker/Firestore a sério), mas o
+ * resto (getSessao, sessaoAtiva, logout, onExpirar, temContaPendente)
  * mantém-se síncrono, apoiado no mesmo objeto `sessao` em memória.
  *
- * Desenho da password (confirmado com o utilizador, revisão de 19/09):
- * email = `${credencial_ordem.toLowerCase()}@savi.local`; password = o
- * próprio hash SHA-256 do PIN (o mesmo valor guardado em
- * profissionais.pin_hash) — nunca uma segunda credencial que o
- * profissional teria de memorizar à parte. O Worker volta a validar o
- * PIN de forma independente em cada pedido de break-glass (dupla
- * verificação, não redundância inútil).
+ * CORRIGIDO em 26/09/2026 (ver AUDITORIA_SEGURANCA_25-09-2026.md, achado
+ * C1): o desenho anterior usava `password = SHA-256(PIN)` no Firebase
+ * Auth — o valor guardado em profissionais.pin_hash não era só uma
+ * verificação, era literalmente a password válida da conta. Substituído
+ * por Firebase Custom Tokens: o Worker (`POST /auth/login`) valida o nº
+ * de Ordem + PIN (PBKDF2 com sal, rate limiting — nunca no cliente) e só
+ * depois assina um Custom Token; o cliente troca-o por uma sessão real
+ * com `signInWithCustomToken`, sem nunca ter de conhecer nenhuma
+ * "password". O PIN em si nunca chega a sair do pedido a /auth/login em
+ * texto simples fora de HTTPS, e nunca é usado como credencial de
+ * Firebase Auth.
  *
  * Requer firebase-init.js carregado antes (espera pelo evento
  * "firebase-pronto", ver index.html para a ordem de carregamento).
- *
- * TODO CRÍTICO (auditoria de segurança, 25/09/2026 — ver
- * AUDITORIA_SEGURANCA_25-09-2026.md, achado C1): o desenho descrito acima
- * ("password = hash do PIN") tem um problema sério — o valor guardado em
- * profissionais.pin_hash não é só uma verificação, é literalmente a
- * password válida da conta no Firebase Auth. Quem tiver esse campo (um
- * superadmin, uma cópia de segurança do Firestore) pode autenticar-se
- * como essa conta sem nunca saber o PIN real. Ver o achado C1 para o
- * desenho de correção (PBKDF2 com sal + Firebase Custom Tokens emitidos
- * pelo Worker só depois de validar o PIN, em vez de o PIN ser a própria
- * password). Não corrigido nesta sessão por mexer nas credenciais de
- * contas já em produção — precisa de migração coordenada com o Worker e
- * scripts/criar-conta.js.
  */
 (function (global) {
   "use strict";
 
   var SESSAO_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutos, igual ao CLAUDE.md
+  var WORKER_AUTH_URL = "https://savi-worker.pulseira-savi.workers.dev/auth/login";
   var sessao = null;
   var contaPendente = null; // { uid, perfil, papeis } — à espera de escolha de papel
   var pinAtual = null; // guardado só em memória, nunca persistido — ver worker-real.js
@@ -124,12 +116,27 @@
         throw new Error("O PIN tem de ter exatamente 5 caracteres.");
       }
       var pinNorm = pin.toUpperCase();
-      var pinHash = await hashUtil.sha256Hex(pinNorm);
-      var email = credencialOrdem.toLowerCase() + "@savi.local";
+
+      var resposta;
+      try {
+        resposta = await fetch(WORKER_AUTH_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ credencial_ordem: credencialOrdem, pin: pinNorm })
+        });
+      } catch (e) {
+        throw new Error("Não foi possível contactar o servidor. Verifique a ligação à internet.");
+      }
+      var payload = null;
+      try { payload = await resposta.json(); } catch (e) { /* sem corpo JSON */ }
+      if (!resposta.ok) {
+        if (payload && payload.erro === "conta_bloqueada") throw new Error(payload.mensagem);
+        throw new Error("Nº de Ordem ou PIN incorretos.");
+      }
 
       var cred;
       try {
-        cred = await sdk.signInWithEmailAndPassword(sdk.auth, email, pinHash);
+        cred = await sdk.signInWithCustomToken(sdk.auth, payload.customToken);
       } catch (e) {
         throw new Error("Nº de Ordem ou PIN incorretos.");
       }

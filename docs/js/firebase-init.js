@@ -27,7 +27,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth,
-  signInWithEmailAndPassword,
+  signInWithCustomToken,
   onAuthStateChanged,
   signOut
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
@@ -77,7 +77,7 @@ window.firebaseSDK = {
   auth,
   db,
   storage,
-  signInWithEmailAndPassword,
+  signInWithCustomToken,
   onAuthStateChanged,
   signOut,
   collection,

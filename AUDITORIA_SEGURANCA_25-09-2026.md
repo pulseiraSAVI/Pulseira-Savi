@@ -41,6 +41,11 @@ conta.js` + um deploy que não consigo fazer neste ambiente (sem
 credenciais Firebase/Cloudflare) — ver checklist de implementação no
 final.
 
+**Atualização (26/09/2026):** a correção do C1 já está feita no código
+(ver achado C1), mas continua sem deploy — por isso a pontuação acima
+não sobe ainda. A nota de segurança poderá subir após o deploy e a
+reemissão coordenada das contas de teste estarem confirmados.
+
 ---
 
 ## Achados críticos (corrigir antes do primeiro paciente real, mesmo fictício)
@@ -105,12 +110,23 @@ candidata — sem limite, sem alarme.
   máximo 10 pedidos/minuto por IP. Isto é configuração de infraestrutura,
   não código, por isso não precisa de deploy do Worker.
 
-**Porque não corrigi já:** mexe na credencial de login de contas que já
-existem em produção (TESTE01/02, UTIL01, ADMIN01) — uma migração mal
-coordenada bloquearia essas contas. Deixei comentários `TODO` detalhados
-no código (Worker, `auth-real.js`, `criar-conta.js`) com este mesmo
-desenho, prontos a implementar numa sessão dedicada, coordenada com um
-re-provisionamento das contas de teste.
+**Estado:** CORRIGIDO NO CÓDIGO em 26/09/2026, PENDENTE DE DEPLOY —
+migração completa para Firebase Custom Tokens (o login já não usa
+`signInWithEmailAndPassword` nem deriva uma password do PIN). O PIN
+passa a ser validado no backend (Worker) com PBKDF2-SHA256 + sal por
+conta (100 000 iterações) e fica sujeito a bloqueio de 15 minutos ao
+fim de 5 tentativas erradas (campos novos `pin_salt`/
+`tentativas_pin_falhadas`/`bloqueado_ate` em `profissionais`). Só
+depois de validado o PIN é que o Worker assina um Firebase Custom
+Token (RS256), trocado no cliente via `signInWithCustomToken` — elimina
+por completo o vetor descrito neste achado. **Este fix só se torna
+real após `wrangler deploy` do Worker E reemissão coordenada das contas
+de teste existentes (ADMIN01/TESTE01/TESTE02/UTIL01) via
+`scripts/criar-conta.js` atualizado** — ver checklist de deploy em
+`CLAUDE.md`, secção "Execução do roadmap de melhorias — sessão de
+26/09/2026". Até esse deploy acontecer, o comportamento em produção
+permanece o descrito no Anexo A abaixo (teste de força bruta
+pré-correção).
 
 ### C2 — XSS armazenado em vários ecrãs (CORRIGIDO nesta sessão)
 
@@ -262,6 +278,13 @@ consecutivos a `POST /acesso/numero-utente` com `pin: "XXXXX"`
 
 Nenhum atraso crescente, nenhum bloqueio, nenhuma resposta diferente de
 `401 pin_invalido`. Confirma o achado C1.
+
+> **Nota (26/09/2026):** este teste reflete o estado pré-correção do
+> C1. A correção (PBKDF2 + sal + bloqueio de 5 tentativas/15 min +
+> migração para Custom Tokens) já está no código mas ainda não foi
+> implantada — ver estado atualizado no achado C1 acima. Este anexo
+> fica como registo histórico do comportamento observado em produção
+> nesta data, não é reexecutado.
 
 ---
 

@@ -88,7 +88,7 @@ const ORIGENS_PERMITIDAS = [
 
 function corsHeaders(request) {
   const origin = request && request.headers.get("origin");
-  const headers = { "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type, authorization" };
+  const headers = { "access-control-allow-methods": "POST, PATCH, OPTIONS", "access-control-allow-headers": "content-type, authorization" };
   if (origin && ORIGENS_PERMITIDAS.includes(origin)) {
     headers["access-control-allow-origin"] = origin;
   }
@@ -109,17 +109,118 @@ function ErroSAVI(tipo, mensagem, status) {
 }
 ErroSAVI.prototype = Object.create(Error.prototype);
 
+// ---------------------------------------------------------------------
+// PIN: hash com sal (PBKDF2-SHA256) + rate limiting — substitui o SHA-256
+// simples sem sal (achado C1 da auditoria de segurança de 25/09/2026).
+// A password do Firebase Auth deixa de ser derivada do PIN (ver
+// criarCustomToken abaixo); o PIN passa a ser validado exclusivamente
+// aqui, com sal por conta e função de derivação lenta.
+// ---------------------------------------------------------------------
+
+const PBKDF2_ITERACOES = 100000;
+const PIN_MAX_TENTATIVAS = 5;
+const PIN_BLOQUEIO_MS = 15 * 60 * 1000; // 15 minutos
+
+function bufParaHex(buf) {
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function hexParaBuf(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+  return out;
+}
+
+function gerarSaltHex() {
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return bufParaHex(buf);
+}
+
 /**
- * Calcula o hash SHA-256 (hex) de uma string, usando a Web Crypto API
- * nativa do runtime de Workers. Usado para validar o PIN de 5 caracteres
- * — nunca é comparado ou guardado em texto simples, mesmo aqui.
+ * PBKDF2-SHA256, 100 000 iterações, saída de 256 bits — muito mais lento
+ * de atacar offline do que o SHA-256 simples anterior, e o sal por conta
+ * impede pré-computação (rainbow tables) contra todas as contas de uma
+ * vez. Usado tanto para gravar como para verificar o PIN.
  */
-async function sha256Hex(texto) {
-  const buf = new TextEncoder().encode(texto);
-  const hashBuf = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(hashBuf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+async function pbkdf2Hex(pin, saltHex) {
+  const chaveBase = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(pin),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: hexParaBuf(saltHex), iterations: PBKDF2_ITERACOES, hash: "SHA-256" },
+    chaveBase,
+    256
+  );
+  return bufParaHex(bits);
+}
+
+/**
+ * Gera um PIN alfanumérico de 5 caracteres (maiúsculas + dígitos) — usado
+ * na criação de conta e no reset de PIN pelo superadmin. Nunca fica
+ * guardado em texto simples: só é devolvido uma vez, na resposta do
+ * pedido que o gerou, para o superadmin comunicar por um canal seguro.
+ */
+function gerarPinAleatorio() {
+  const alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sem 0/O/1/I, para reduzir erros de leitura
+  const buf = new Uint8Array(5);
+  crypto.getRandomValues(buf);
+  return Array.from(buf).map((b) => alfabeto[b % alfabeto.length]).join("");
+}
+
+/**
+ * Verifica o PIN com sal para uma conta já localizada, aplicando rate
+ * limiting: incrementa tentativas_pin_falhadas em cada falha e bloqueia a
+ * conta durante PIN_BLOQUEIO_MS ao fim de PIN_MAX_TENTATIVAS seguidas.
+ * Reposta a zero em caso de sucesso. Usado tanto no novo /auth/login como
+ * na validação de PIN do break-glass (validarPapelUtilizadorEPin).
+ *
+ * Contas ainda no esquema antigo (sem pin_salt, migradas antes da
+ * auditoria de 25/09/2026) são recusadas com um erro explícito — não há
+ * fallback silencioso para SHA-256 sem sal; a conta tem de ser
+ * reemitida com scripts/criar-conta.js (esquema novo).
+ */
+async function verificarPinDaConta(env, contaId, campos, pinRecebido) {
+  const agora = Date.now();
+  if (campos.bloqueado_ate) {
+    const bloqueadoAteMs = new Date(campos.bloqueado_ate).getTime();
+    if (agora < bloqueadoAteMs) {
+      throw new ErroSAVI(
+        "conta_bloqueada",
+        "Demasiadas tentativas falhadas. Tente novamente mais tarde.",
+        423
+      );
+    }
+  }
+  if (!campos.pin_salt) {
+    throw new ErroSAVI(
+      "erro_configuracao",
+      "Esta conta ainda usa o esquema de PIN antigo — peça ao superadmin para a reemitir (scripts/criar-conta.js).",
+      500
+    );
+  }
+
+  const hashCalculado = await pbkdf2Hex(String(pinRecebido || "").toUpperCase(), campos.pin_salt);
+  if (hashCalculado !== campos.pin_hash) {
+    const tentativas = (campos.tentativas_pin_falhadas || 0) + 1;
+    const camposPatch = { tentativas_pin_falhadas: { integerValue: String(tentativas) } };
+    if (tentativas >= PIN_MAX_TENTATIVAS) {
+      camposPatch.bloqueado_ate = { timestampValue: new Date(agora + PIN_BLOQUEIO_MS).toISOString() };
+    }
+    await firestorePatch(env, `profissionais/${contaId}`, camposPatch);
+    throw new ErroSAVI("pin_invalido", "PIN incorreto.", 401);
+  }
+
+  if (campos.tentativas_pin_falhadas || campos.bloqueado_ate) {
+    await firestorePatch(env, `profissionais/${contaId}`, {
+      tentativas_pin_falhadas: { integerValue: "0" },
+      bloqueado_ate: { nullValue: null }
+    });
+  }
 }
 
 /**
@@ -187,22 +288,15 @@ function validarJanelaDeSessao(claims) {
  * firestoreGet abaixo) para ler o pin_hash real da conta.
  */
 /**
- * TODO CRÍTICO (auditoria de segurança, 25/09/2026 — ver
- * AUDITORIA_SEGURANCA_25-09-2026.md, achado C1): esta função compara
- * SHA-256 simples sem sal, e não há limite de tentativas — confirmado ao
- * vivo (8 pedidos com PIN errado seguidos, todos aceites sem atraso nem
- * bloqueio). Corrigir, coordenado com auth-real.js e scripts/criar-
- * conta.js:
- *   1. Migrar o hash do PIN para PBKDF2/scrypt com sal por conta (Web
- *      Crypto API tem PBKDF2 nativo, sem biblioteca nova).
- *   2. Adicionar contador de tentativas falhadas + bloqueio temporário
- *      por conta (campos novos em profissionais/{id}, incrementados
- *      aqui a cada pin_invalido).
- *   3. Configurar uma Cloudflare Rate Limiting Rule em /acesso/* (painel,
- *      sem código) como mitigação imediata enquanto 1-2 não estão prontos.
- * Não implementado nesta sessão porque mexe na credencial de login das
- * contas já em produção (TESTE01/02, UTIL01, ADMIN01) — precisa de
- * migração coordenada, não de um commit isolado.
+ * CORRIGIDO em 26/09/2026 (ver AUDITORIA_SEGURANCA_25-09-2026.md, achado
+ * C1): passou a delegar em verificarPinDaConta (PBKDF2 com sal + rate
+ * limiting/bloqueio), em vez de comparar SHA-256 simples sem sal e sem
+ * limite de tentativas. Continua a exigir migração das contas já em
+ * produção (TESTE01/02, UTIL01, ADMIN01) — ver checklist de deploy em
+ * AUDITORIA_SEGURANCA_25-09-2026.md / CLAUDE.md: precisam de ser
+ * reemitidas com scripts/criar-conta.js (esquema novo, com sal) antes de
+ * o deploy desta versão do Worker entrar em produção, senão ficam sem
+ * pin_salt e o Worker recusa-as com "erro_configuracao".
  */
 async function validarPapelUtilizadorEPin(env, claims, pinRecebido) {
   if (!claims.papeis.includes("utilizador")) {
@@ -216,10 +310,7 @@ async function validarPapelUtilizadorEPin(env, claims, pinRecebido) {
   if (!profissional || !profissional.ativo) {
     throw new ErroSAVI("acesso_negado", "Conta inativa ou não encontrada.", 403);
   }
-  const hashRecebido = await sha256Hex(pinRecebido);
-  if (hashRecebido !== profissional.pin_hash) {
-    throw new ErroSAVI("pin_invalido", "PIN incorreto.", 401);
-  }
+  await verificarPinDaConta(env, claims.profissionalId, profissional, pinRecebido);
   return profissional;
 }
 
@@ -250,12 +341,14 @@ let _accessTokenCache = null;
  * chave da service account, copiado de Firebase Console > Definições do
  * projeto > Contas de serviço > Gerar nova chave privada).
  */
-async function obterAccessTokenServiceAccount(env) {
-  const agora = Math.floor(Date.now() / 1000);
-  if (_accessTokenCache && _accessTokenCache.expiraEm > agora + 60) {
-    return _accessTokenCache.token;
-  }
-
+/**
+ * Lê e valida FIREBASE_SERVICE_ACCOUNT_KEY uma única vez — partilhado
+ * entre obterAccessTokenServiceAccount (troca por access token OAuth2,
+ * para falar com o Firestore) e criarCustomToken (assina diretamente um
+ * Firebase Custom Token, para o novo /auth/login — ver achado C1 da
+ * auditoria de 25/09/2026).
+ */
+function lerCredenciaisServiceAccount(env) {
   if (!env.FIREBASE_SERVICE_ACCOUNT_KEY) {
     throw new ErroSAVI(
       "erro_configuracao",
@@ -263,10 +356,8 @@ async function obterAccessTokenServiceAccount(env) {
       500
     );
   }
-
-  let credenciais;
   try {
-    credenciais = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_KEY);
+    return JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_KEY);
   } catch (e) {
     throw new ErroSAVI(
       "erro_configuracao",
@@ -274,6 +365,15 @@ async function obterAccessTokenServiceAccount(env) {
       500
     );
   }
+}
+
+async function obterAccessTokenServiceAccount(env) {
+  const agora = Math.floor(Date.now() / 1000);
+  if (_accessTokenCache && _accessTokenCache.expiraEm > agora + 60) {
+    return _accessTokenCache.token;
+  }
+
+  const credenciais = lerCredenciaisServiceAccount(env);
 
   const chavePrivada = await importPKCS8(credenciais.private_key, "RS256");
   const assertion = await new SignJWT({ scope: "https://www.googleapis.com/auth/datastore" })
@@ -378,6 +478,81 @@ async function firestoreCreate(env, collectionId, fields) {
   });
   if (!resp.ok) throw new ErroSAVI("erro", "Erro ao escrever no Firestore.", 502);
   return resp.json();
+}
+
+// Cria um documento com um ID escolhido por nós (em vez de auto-gerado)
+// — usado para criar profissionais/{uid} com o mesmo uid que vai ser
+// usado no Custom Token (ver handleAdminCriarConta).
+async function firestoreCreateComId(env, collectionId, docId, fields) {
+  const accessToken = await obterAccessTokenServiceAccount(env);
+  const resp = await fetch(
+    `${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}/${collectionId}?documentId=${encodeURIComponent(docId)}`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ fields })
+    }
+  );
+  if (!resp.ok) {
+    const corpo = await resp.text().catch(() => "");
+    if (resp.status === 409) throw new ErroSAVI("ja_existe", "Já existe uma conta com este nº de Ordem.", 409);
+    console.error("firestoreCreateComId falhou:", resp.status, corpo);
+    throw new ErroSAVI("erro", "Erro ao escrever no Firestore.", 502);
+  }
+  return resp.json();
+}
+
+// Atualiza só os campos indicados (updateMask) — nunca substitui o
+// documento inteiro. `campos` já vem no formato REST do Firestore
+// ({ nomeCampo: { stringValue/integerValue/... } }).
+async function firestorePatch(env, path, campos) {
+  const accessToken = await obterAccessTokenServiceAccount(env);
+  const mask = Object.keys(campos).map((k) => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join("&");
+  const resp = await fetch(`${FIRESTORE_BASE_URL(env.FIREBASE_PROJECT_ID)}/${path}?${mask}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ fields: campos })
+  });
+  if (!resp.ok) {
+    const corpo = await resp.text().catch(() => "");
+    console.error("firestorePatch falhou:", resp.status, corpo);
+    throw new ErroSAVI("erro", "Erro ao atualizar o Firestore.", 502);
+  }
+  return resp.json();
+}
+
+/**
+ * Assina diretamente um Firebase Custom Token (JWT RS256 com a chave
+ * privada da service account) — substitui, para o novo /auth/login, a
+ * antiga estratégia de "password do Firebase Auth = hash do PIN" (achado
+ * C1 da auditoria de 25/09/2026). O cliente troca este token por uma
+ * sessão real com `signInWithCustomToken`, e as claims aqui incluídas
+ * (papeis, profissional_id, funcao_auditor) ficam disponíveis no ID token
+ * resultante, exatamente como as Firestore Rules já esperam
+ * (request.auth.token.papeis, etc.) — sem precisar de
+ * `admin.auth().setCustomUserClaims()` à parte.
+ *
+ * `uid` é sempre o ID do documento profissionais/{uid} já existente (ou
+ * recém-criado) — o Firebase Auth cria ou reutiliza automaticamente o
+ * utilizador com esse uid ao trocar o custom token, por isso as
+ * referências existentes (pacientes.criado_por_id, etc.) nunca
+ * precisam de migração.
+ */
+async function criarCustomToken(env, uid, claims) {
+  const credenciais = lerCredenciaisServiceAccount(env);
+  const chavePrivada = await importPKCS8(credenciais.private_key, "RS256");
+  const agora = Math.floor(Date.now() / 1000);
+  // "uid" e "claims" são campos específicos do formato de Custom Token do
+  // Firebase (fora do standard JWT) — SignJWT aceita-os como payload
+  // normal, tal como qualquer outro claim.
+  return new SignJWT({ uid, claims })
+    .setProtectedHeader({ alg: "RS256" })
+    .setIssuer(credenciais.client_email)
+    .setSubject(credenciais.client_email)
+    .setAudience("https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit")
+    .setIssuedAt(agora)
+    .setExpirationTime(agora + 3600)
+    .sign(chavePrivada);
 }
 
 // ---------------------------------------------------------------------
@@ -634,6 +809,165 @@ async function handleAcessoIdentidade(request, env, ctx) {
 }
 
 // ---------------------------------------------------------------------
+// POST /auth/login — substitui signInWithEmailAndPassword(hash do PIN)
+// (achado C1 da auditoria de 25/09/2026): o cliente nunca mais precisa de
+// conhecer nenhuma "password" — envia nº de Ordem + PIN, o Worker valida
+// o PIN (PBKDF2 com sal + rate limiting) e devolve um Custom Token para
+// o cliente trocar por uma sessão real do Firebase Auth.
+// ---------------------------------------------------------------------
+
+async function handleAuthLogin(request, env, ctx) {
+  const body = await request.json().catch(() => ({}));
+  const credencialOrdem = String(body.credencial_ordem || "").trim();
+  const pin = body.pin;
+
+  if (!credencialOrdem || !pin) {
+    throw new ErroSAVI("dados_invalidos", "Nº de Ordem e PIN são obrigatórios.", 400);
+  }
+
+  const doc = await firestoreQueryUm(env, "profissionais", "credencial_ordem", credencialOrdem);
+  if (!doc) {
+    // Mensagem genérica de propósito — nunca revelar se foi a credencial
+    // ou o PIN que estava errado (evita enumerar contas existentes).
+    throw new ErroSAVI("credenciais_invalidas", "Nº de Ordem ou PIN incorretos.", 401);
+  }
+  const contaId = doc.name.split("/").pop();
+  const campos = extrairCampos(doc);
+
+  if (!campos.ativo) {
+    throw new ErroSAVI("acesso_negado", "Esta conta está inativa. Contacte o superadmin.", 403);
+  }
+
+  try {
+    await verificarPinDaConta(env, contaId, campos, pin);
+  } catch (e) {
+    if (e instanceof ErroSAVI && e.tipo === "pin_invalido") {
+      // Mesma mensagem genérica do caso "conta não encontrada" acima.
+      throw new ErroSAVI("credenciais_invalidas", "Nº de Ordem ou PIN incorretos.", 401);
+    }
+    throw e;
+  }
+
+  const customToken = await criarCustomToken(env, contaId, {
+    papeis: campos.papeis || [],
+    profissional_id: contaId,
+    funcao_auditor: !!campos.funcao_auditor
+  });
+
+  return jsonResponse({ customToken });
+}
+
+// ---------------------------------------------------------------------
+// Gestão de contas (superadmin) — POST /admin/contas, PATCH
+// /admin/contas/:id, POST /admin/contas/:id/reset-pin. Substitui, para
+// estas três operações, a necessidade de correr scripts/criar-conta.js
+// manualmente (ver CLAUDE.md, roadmap "gestão de contas desde a app").
+// Eliminar contas fica de fora de propósito — o efeito em cascata sobre
+// pacientes já criados por essa conta ainda não foi decidido (ver
+// ROADMAP_MELHORIAS.md, 1.1).
+// ---------------------------------------------------------------------
+
+function exigirSuperadmin(claims) {
+  if (!claims.papeis.includes("superadmin")) {
+    throw new ErroSAVI("acesso_negado", "Só o superadmin pode gerir contas.", 403);
+  }
+}
+
+function campoTexto(v) {
+  return { stringValue: String(v || "") };
+}
+
+async function handleAdminCriarConta(request, env, ctx) {
+  const claims = await verificarIdToken(request, env);
+  exigirSuperadmin(claims);
+
+  const body = await request.json().catch(() => ({}));
+  const nome = String(body.nome || "").trim();
+  const credencialOrdem = String(body.credencial_ordem || "").trim();
+  const papeis = Array.isArray(body.papeis) ? body.papeis.filter((p) => ["profissional", "utilizador", "superadmin"].includes(p)) : [];
+  const funcaoAuditor = !!body.funcao_auditor && papeis.includes("superadmin");
+
+  if (!nome || !credencialOrdem || papeis.length === 0) {
+    throw new ErroSAVI("dados_invalidos", "Nome, nº de Ordem e pelo menos um papel são obrigatórios.", 400);
+  }
+
+  const existente = await firestoreQueryUm(env, "profissionais", "credencial_ordem", credencialOrdem);
+  if (existente) {
+    throw new ErroSAVI("ja_existe", "Já existe uma conta com este nº de Ordem.", 409);
+  }
+
+  const uid = crypto.randomUUID();
+  const pin = gerarPinAleatorio();
+  const salt = gerarSaltHex();
+  const pinHash = await pbkdf2Hex(pin, salt);
+
+  await firestoreCreateComId(env, "profissionais", uid, {
+    nome: campoTexto(nome),
+    credencial_ordem: campoTexto(credencialOrdem),
+    pin_hash: campoTexto(pinHash),
+    pin_salt: campoTexto(salt),
+    tentativas_pin_falhadas: { integerValue: "0" },
+    bloqueado_ate: { nullValue: null },
+    papeis: { arrayValue: { values: papeis.map((p) => ({ stringValue: p })) } },
+    funcao_auditor: { booleanValue: funcaoAuditor },
+    servico: campoTexto(body.servico),
+    especialidade: campoTexto(body.especialidade),
+    instituicao_servico: campoTexto(body.instituicao_servico),
+    telefone_institucional: campoTexto(body.telefone_institucional),
+    ativo: { booleanValue: true },
+    criado_em: { timestampValue: new Date().toISOString() }
+  });
+
+  return jsonResponse({ uid, credencial_ordem: credencialOrdem, pin }, 201);
+}
+
+async function handleAdminEditarConta(request, env, ctx, contaId) {
+  const claims = await verificarIdToken(request, env);
+  exigirSuperadmin(claims);
+
+  const body = await request.json().catch(() => ({}));
+  const patch = {};
+  if (body.nome !== undefined) patch.nome = campoTexto(body.nome);
+  if (body.servico !== undefined) patch.servico = campoTexto(body.servico);
+  if (body.especialidade !== undefined) patch.especialidade = campoTexto(body.especialidade);
+  if (body.instituicao_servico !== undefined) patch.instituicao_servico = campoTexto(body.instituicao_servico);
+  if (body.telefone_institucional !== undefined) patch.telefone_institucional = campoTexto(body.telefone_institucional);
+  if (Array.isArray(body.papeis)) {
+    const papeis = body.papeis.filter((p) => ["profissional", "utilizador", "superadmin"].includes(p));
+    patch.papeis = { arrayValue: { values: papeis.map((p) => ({ stringValue: p })) } };
+  }
+  if (body.funcao_auditor !== undefined) patch.funcao_auditor = { booleanValue: !!body.funcao_auditor };
+
+  if (Object.keys(patch).length === 0) {
+    throw new ErroSAVI("dados_invalidos", "Nenhum campo para atualizar.", 400);
+  }
+
+  await firestorePatch(env, `profissionais/${contaId}`, patch);
+  return jsonResponse({ ok: true });
+}
+
+async function handleAdminResetPin(request, env, ctx, contaId) {
+  const claims = await verificarIdToken(request, env);
+  exigirSuperadmin(claims);
+
+  const doc = await firestoreGet(env, `profissionais/${contaId}`);
+  if (!doc) throw new ErroSAVI("nao_encontrado", "Conta não encontrada.", 404);
+
+  const pin = gerarPinAleatorio();
+  const salt = gerarSaltHex();
+  const pinHash = await pbkdf2Hex(pin, salt);
+
+  await firestorePatch(env, `profissionais/${contaId}`, {
+    pin_hash: campoTexto(pinHash),
+    pin_salt: campoTexto(salt),
+    tentativas_pin_falhadas: { integerValue: "0" },
+    bloqueado_ate: { nullValue: null }
+  });
+
+  return jsonResponse({ pin });
+}
+
+// ---------------------------------------------------------------------
 // Utilitário: converte um Document do formato REST do Firestore
 // ({ fields: { campo: { stringValue: ... } } }) num objeto JS simples.
 // ---------------------------------------------------------------------
@@ -672,12 +1006,23 @@ export default {
 
     let resposta;
     try {
+      const matchContaId = url.pathname.match(/^\/admin\/contas\/([^/]+)$/);
+      const matchResetPin = url.pathname.match(/^\/admin\/contas\/([^/]+)\/reset-pin$/);
+
       if (request.method === "POST" && url.pathname === "/acesso/pulseira") {
         resposta = await handleAcessoPulseira(request, env, ctx);
       } else if (request.method === "POST" && url.pathname === "/acesso/numero-utente") {
         resposta = await handleAcessoNumeroUtente(request, env, ctx);
       } else if (request.method === "POST" && url.pathname === "/acesso/identidade") {
         resposta = await handleAcessoIdentidade(request, env, ctx);
+      } else if (request.method === "POST" && url.pathname === "/auth/login") {
+        resposta = await handleAuthLogin(request, env, ctx);
+      } else if (request.method === "POST" && url.pathname === "/admin/contas") {
+        resposta = await handleAdminCriarConta(request, env, ctx);
+      } else if (request.method === "PATCH" && matchContaId) {
+        resposta = await handleAdminEditarConta(request, env, ctx, matchContaId[1]);
+      } else if (request.method === "POST" && matchResetPin) {
+        resposta = await handleAdminResetPin(request, env, ctx, matchResetPin[1]);
       } else {
         // Nota: não existe /nivel2 nem qualquer rota equivalente — Nível 2
         // foi eliminado por completo desta revisão (CLAUDE.md).

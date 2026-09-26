@@ -139,6 +139,68 @@ em `backend/cloudflare-worker/src/index.js`, `docs/js/auth-real.js` e
 `scripts/criar-conta.js` — falta implementar e fazer o deploy
 coordenado (mexe nas credenciais das contas já em produção).
 
+**Execução do roadmap de melhorias — sessão de 26/09/2026 (código
+pronto, deploy e migração ainda por fazer):**
+- **Correção do achado crítico C1 da auditoria** (PIN = password do
+  Firebase Auth, sem sal, sem limite de tentativas): migração completa
+  para **Firebase Custom Tokens**. O login (`POST /auth/login` no
+  Worker) já não usa `signInWithEmailAndPassword` — valida o PIN no
+  backend (PBKDF2-SHA256 + sal por conta, 100 000 iterações, campos
+  novos `pin_salt`/`tentativas_pin_falhadas`/`bloqueado_ate` em
+  `profissionais`, bloqueio de 15 min ao fim de 5 tentativas erradas) e
+  só depois assina um Custom Token (`criarCustomToken`, RS256, chave da
+  própria service account) que o cliente troca via
+  `signInWithCustomToken`. `docs/js/firebase-init.js`,
+  `docs/js/auth-real.js` e `scripts/criar-conta.js` atualizados em
+  conjunto; `docs/js/hash-util.js` ficou órfão e foi removido (do
+  precache do `sw.js`, de `index.html` e do repositório).
+- **Roadmap 1.1 (gestão de contas desde a app)**: novos endpoints no
+  Worker — `POST /admin/contas` (criar conta, gera PIN aleatório
+  devolvido uma única vez), `PATCH /admin/contas/:id` (editar
+  nome/papéis/serviço/etc.), `POST /admin/contas/:id/reset-pin` (gera e
+  devolve novo PIN) — todos exigem `superadmin`. A vista de superadmin
+  "Contas" (`docs/js/views/admin-contas.js`) já usa estes 3 endpoints;
+  ativar/desativar continua a ser escrita direta no Firestore, como já
+  estava. **Eliminação de conta continua deliberadamente fora de
+  âmbito** (efeito em cascata sobre pacientes/acessos ainda por
+  decidir).
+- **Roadmap 1.3 (gravação de pulseiras NFC)**: `docs/js/views/
+  admin-tokens.js` ganhou o botão "Gravar chip" (Web NFC API,
+  `NDEFReader`, só Chrome/Android) na lista de pulseiras
+  `nao_atribuida` — grava sempre e só o token opaco já existente, nunca
+  dado clínico. **Não testado em hardware real** (sem Android físico
+  disponível no ambiente de desenvolvimento) — testar antes de usar em
+  produção.
+- `scripts/criar-conta.js` deixou de tocar no Firebase Auth
+  (`createUser`/`setCustomUserClaims`) — escreve só o documento
+  Firestore; a conta Auth correspondente é criada automaticamente no
+  primeiro login via Custom Token. Passou também a suportar reemitir
+  uma conta existente (procura por `credencial_ordem`) para migrar
+  contas do esquema antigo.
+- **`sw.js` → `savi-v10`.**
+- **Checklist de deploy/migração — sequência obrigatória, ainda por
+  executar (precisa das credenciais Cloudflare/Firebase que este
+  ambiente não tem):**
+  1. `cd backend/cloudflare-worker && npx wrangler deploy` — a partir
+     deste momento o Worker novo já exige `pin_salt`; qualquer conta
+     sem esse campo (todas as 4 contas de teste atuais — `ADMIN01`,
+     `TESTE01`, `TESTE02`, `UTIL01` — ainda no esquema antigo) fica
+     temporariamente incapaz de entrar (`erro_configuracao`), até ao
+     passo 2.
+  2. Imediatamente a seguir, reemitir as 4 contas de teste com o
+     `scripts/criar-conta.js` novo (mesmos nºs de Ordem, pode manter ou
+     gerar novo PIN — o script deteta a conta existente pelo
+     `credencial_ordem` e reemite-a). Janela de indisponibilidade entre
+     os passos 1 e 2: idealmente segundos, correr os dois em sequência
+     imediata.
+  3. Confirmar login com as 4 contas reemitidas antes de considerar a
+     migração concluída.
+  4. Só depois disto testar os novos endpoints `/admin/contas` (criar
+     conta nova, editar, reiniciar PIN) a partir da vista de
+     superadmin.
+  5. Testar "Gravar chip" num Android físico com Chrome antes de usar
+     em qualquer pulseira real.
+
 **Pendente antes do primeiro paciente REAL — bloco legal/organizativo
 (NÃO se resolve com código, ver aviso logo no início deste documento):**
 - EIPD/DPIA formal.

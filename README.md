@@ -137,45 +137,20 @@ novo menu de footer do Nível 1); `font-size:16px` nos campos de
 formulário (evita o zoom automático do Safari iOS ao focar um input);
 alvos de toque com pelo menos 44px de altura.
 
-## Simulação vs. scaffolding real
+## Estado da infraestrutura
 
-Esta iteração continua a ter duas partes de natureza muito diferente —
-**tudo o que está em `docs/` corre inteiramente no browser, sem qualquer
-ligação a Firebase ou Cloudflare reais**. Ligar a infraestrutura real é
-um passo seguinte, ainda não feito:
+Esta secção descrevia, até 25/09/2026, um modo de simulação (`mockdb.js`
+em `localStorage`, `auth-sim.js`, `worker-sim.js`) sem qualquer ligação
+real a Firebase/Cloudflare. Esse modo já não existe — a app está ligada
+a infraestrutura real de ponta a ponta desde o pivô de produção. `docs/`
+já não abre por `file://`; testar sempre por http(s).
 
-**`docs/js/*.js` — simulação, corre inteiramente no browser:**
-- `mockdb.js` simula o Firestore (persistido em `localStorage`),
-  incluindo `profissionais` com `pin_hash`, `pacientes` com
-  `numero_utente`/`sexo`/`gestor_do_caso`, `dados_nivel1` no formato
-  novo, e a nova coleção `documentos`.
-- `hash-util.js` calcula o hash SHA-256 do PIN via Web Crypto API — o
-  PIN nunca é guardado nem comparado em texto simples, mesmo aqui.
-- `auth-sim.js` simula o Firebase Auth: identificação por nº de Ordem +
-  PIN, escolha de papel quando a conta tem mais de um, timeout de
-  sessão de 5 min real.
-- `worker-sim.js` simula o Cloudflare Worker: é o único módulo que fala
-  com o `mockdb` durante os 3 métodos de acesso, escrevendo sempre em
-  `acessos` (mesmo em negação).
-
-Isto permite navegar os três fluxos (utilizador, profissional,
-superadmin) de ponta a ponta sem qualquer infraestrutura externa.
-
-**`backend/` — scaffolding comentado para produção, não funcional sem
-credenciais reais:**
-- `backend/firestore.rules` — Firestore Security Rules reais, já no
-  modelo novo de papéis, prontas para deploy (`firebase deploy --only
-  firestore:rules`), mas que precisam de um projeto Firebase real com
-  as custom claims configuradas para fazer sentido.
-- `backend/firestore-schema.md` — schema completo das coleções
-  Firestore desta revisão, com tipos de campo e índices sugeridos.
-- `backend/cloudflare-worker/` — esqueleto do Worker real (`src/index.js`
-  + `wrangler.toml`) com os 3 endpoints de acesso (`/acesso/pulseira`,
-  `/acesso/numero-utente`, `/acesso/identidade`) e validação do PIN por
-  hash — todos os pontos que precisam de configuração real assinalados
-  com `TODO` (chave pública do Firebase para verificar ID tokens,
-  `FIREBASE_PROJECT_ID`, credenciais da service account,
-  `RESEND_API_KEY`). Não inventa segredos nem chaves.
+Para o estado atual, exato e sempre atualizado (o que já está implantado
+vs. o que falta antes do primeiro paciente fictício/real), consultar a
+secção **"Roadmap para o primeiro paciente real"** em `CLAUDE.md` — essa
+secção é a fonte da verdade, não este README. Ver também
+`AUDITORIA_SEGURANCA_25-09-2026.md` para o estado de segurança e
+`ROADMAP_MELHORIAS.md` para as melhorias planeadas pós-piloto.
 
 ## Próximos passos para sair da simulação
 

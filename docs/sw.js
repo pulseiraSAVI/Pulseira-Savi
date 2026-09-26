@@ -25,8 +25,16 @@
  * remove da lista os ficheiros órfãos entretanto apagados do
  * repositório (nunca estiveram nesta lista de qualquer forma, por
  * nunca terem sido carregados por index.html).
+ *
+ * v10 (26/09/2026): roadmap de melhorias — login passa a usar Firebase
+ * Custom Tokens em vez de password derivada do PIN (achado C1 da
+ * auditoria, corrigido — ver auth-real.js e o Worker), o que torna
+ * js/hash-util.js órfão (removido do precache e do repositório); gestão
+ * de contas (criar/editar/reiniciar PIN) a partir da vista de superadmin
+ * "Contas"; gravação de chips NFC a partir da vista "Pulseiras e lotes"
+ * (Web NFC API, só Chrome/Android).
  */
-const SW_VERSION = "savi-v9";
+const SW_VERSION = "savi-v10";
 const CACHE_NAME = `savi-cache-${SW_VERSION}`;
 
 // Caminhos relativos ao scope do service worker (raiz de docs/), para
@@ -39,7 +47,6 @@ const ASSETS = [
   "./css/styles.css",
   "./js/icons.js",
   "./js/dom-util.js",
-  "./js/hash-util.js",
   "./js/firebase-init.js",
   "./js/mockdb.js",
   "./js/firestore-real.js",

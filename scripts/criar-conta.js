@@ -1,17 +1,28 @@
 /**
  * scripts/criar-conta.js
- * SAVI — cria (ou atualiza) uma conta de profissional/utilizador/superadmin:
- * regista o utilizador no Firebase Auth, define as custom claims (papeis,
- * profissional_id, funcao_auditor) e escreve o documento correspondente em
- * `profissionais/{uid}` no Firestore.
+ * SAVI — cria (ou reemite) uma conta de profissional/utilizador/superadmin,
+ * escrevendo diretamente o documento em `profissionais/{uid}` no Firestore.
  *
- * Existe porque as custom claims só podem ser definidas com o Admin SDK
- * (nunca a partir do cliente) — por isso este é também o script usado para
- * o bootstrap da PRIMEIRA conta superadmin, antes de existir sequer uma
- * vista de superadmin funcional na app para criar as seguintes.
+ * Existe porque é o caminho de bootstrap da PRIMEIRA conta superadmin,
+ * antes de existir qualquer conta capaz de usar os endpoints de gestão de
+ * contas do Worker (`POST /admin/contas`, ver backend/cloudflare-worker/
+ * src/index.js) — a partir da segunda conta em diante, o caminho normal
+ * passa a ser a vista de superadmin "Contas" na app (que fala com esses
+ * endpoints), não este script.
+ *
+ * CORRIGIDO em 26/09/2026 (ver AUDITORIA_SEGURANCA_25-09-2026.md, achado
+ * C1): já não toca no Firebase Auth (createUser/setCustomUserClaims)
+ * nem deriva nenhuma "password" do PIN. O PIN passa a ser guardado com
+ * PBKDF2-SHA256 + sal por conta (100 000 iterações, o mesmo esquema e os
+ * mesmos parâmetros do Worker — ver pbkdf2Hex em
+ * backend/cloudflare-worker/src/index.js, têm de ficar sempre
+ * sincronizados). O login (`/auth/login` no Worker) autentica-se com
+ * Firebase Custom Tokens assinados só depois de validar o PIN — a conta
+ * Firebase Auth correspondente a este uid é criada automaticamente no
+ * primeiro login, nunca aqui.
  *
  * Alinhado com backend/firestore-schema.md e backend/firestore.rules —
- * qualquer alteração de campos tem de ser feita nos três sítios.
+ * qualquer alteração de campos tem de ser feita nos dois sítios.
  *
  * Uso:
  *   cd scripts
@@ -29,22 +40,19 @@ const crypto = require("crypto");
 const admin = require("firebase-admin");
 
 const PAPEIS_VALIDOS = ["profissional", "utilizador", "superadmin"];
+const PBKDF2_ITERACOES = 100000; // tem de ser IGUAL a PBKDF2_ITERACOES no Worker
 
-// TODO CRÍTICO (auditoria de segurança, 25/09/2026 — ver
-// AUDITORIA_SEGURANCA_25-09-2026.md, achado C1): sha256Hex sem sal, usado
-// como password do Firebase Auth (ver mais abaixo, passwordAuth) — quem
-// tiver o valor de pin_hash consegue autenticar-se diretamente, sem saber
-// o PIN. Migrar para PBKDF2/scrypt com sal por conta, e a password do
-// Firebase Auth deixar de ser derivada do PIN (ver desenho completo no
-// achado C1: gerar password aleatória própria, ou migrar para Firebase
-// Custom Tokens emitidos pelo Worker após validar o PIN). Não corrigido
-// aqui porque exige re-emitir todas as contas já criadas em coordenação
-// com o Worker.
-function sha256Hex(texto) {
-  // Tem de replicar exatamente docs/js/hash-util.js (SHA-256 hex, UTF-8,
-  // sem sal) e a validação equivalente no Worker — o PIN nunca é guardado
-  // em texto simples em lado nenhum, incluindo aqui.
-  return crypto.createHash("sha256").update(String(texto), "utf8").digest("hex");
+// Tem de replicar exatamente pbkdf2Hex() em
+// backend/cloudflare-worker/src/index.js (PBKDF2-HMAC-SHA256, mesmo
+// número de iterações, saída de 256 bits/32 bytes) — Node e Web Crypto
+// implementam o mesmo standard (PKCS#5/RFC 2898), por isso o mesmo PIN +
+// sal produz sempre o mesmo hash nos dois lados.
+function pbkdf2Hex(pin, saltHex) {
+  return crypto.pbkdf2Sync(pin, Buffer.from(saltHex, "hex"), PBKDF2_ITERACOES, 32, "sha256").toString("hex");
+}
+
+function gerarSaltHex() {
+  return crypto.randomBytes(16).toString("hex");
 }
 
 function pergunta(rl, texto) {
@@ -65,13 +73,23 @@ async function main() {
   admin.initializeApp({
     credential: admin.credential.applicationDefault()
   });
+  const db = admin.firestore();
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-  console.log("\n=== SAVI — criar/atualizar conta ===\n");
+  console.log("\n=== SAVI — criar/reemitir conta ===\n");
 
   const nome = await pergunta(rl, "Nome completo: ");
   const credencialOrdem = (await pergunta(rl, "Nº de Ordem (identificador de login): ")).trim();
+
+  // Se já existir uma conta com este nº de Ordem, reemite-a (novo PIN,
+  // novo sal) em vez de criar uma duplicada — útil sobretudo para migrar
+  // as contas do esquema antigo (SHA-256 sem sal) para o esquema novo.
+  const existente = await db.collection("profissionais").where("credencial_ordem", "==", credencialOrdem).limit(1).get();
+  const uidExistente = existente.empty ? null : existente.docs[0].id;
+  if (uidExistente) {
+    console.log(`\nJá existe uma conta com este nº de Ordem (uid ${uidExistente}) — vai ser reemitida com um PIN novo.`);
+  }
 
   let pin = "";
   while (pin.length !== 5) {
@@ -111,62 +129,37 @@ async function main() {
 
   rl.close();
 
-  const email = `${credencialOrdem.toLowerCase()}@savi.local`;
-  const pinHash = sha256Hex(pin);
-  // A password do Firebase Auth É o mesmo hash do PIN — nunca uma segunda
-  // credencial que o profissional teria de memorizar à parte. O Worker
-  // volta a validar o PIN de forma independente (profissionais/pin_hash)
-  // em cada pedido de break-glass — dupla verificação, não redundância
-  // inútil.
-  const passwordAuth = pinHash;
+  const uid = uidExistente || crypto.randomUUID();
+  const salt = gerarSaltHex();
+  const pinHash = pbkdf2Hex(pin, salt);
 
-  console.log(`\nA criar/atualizar utilizador Firebase Auth: ${email} ...`);
+  await db.collection("profissionais").doc(uid).set(
+    {
+      nome,
+      credencial_ordem: credencialOrdem,
+      pin_hash: pinHash,
+      pin_salt: salt,
+      tentativas_pin_falhadas: 0,
+      bloqueado_ate: null,
+      papeis: papeisInput,
+      funcao_auditor: funcaoAuditor,
+      servico: servico || null,
+      especialidade: especialidade || null,
+      instituicao_servico: instituicaoServico || null,
+      telefone_institucional: telefoneInstitucional || null,
+      ativo: true,
+      criado_em: admin.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
 
-  let userRecord;
-  try {
-    userRecord = await admin.auth().getUserByEmail(email);
-    await admin.auth().updateUser(userRecord.uid, { password: passwordAuth, displayName: nome, disabled: false });
-    console.log(`Utilizador já existia (uid ${userRecord.uid}) — password e nome atualizados.`);
-  } catch (e) {
-    if (e.code !== "auth/user-not-found") throw e;
-    userRecord = await admin.auth().createUser({ email, password: passwordAuth, displayName: nome });
-    console.log(`Utilizador criado (uid ${userRecord.uid}).`);
-  }
-
-  const claims = {
-    papeis: papeisInput,
-    profissional_id: userRecord.uid,
-    funcao_auditor: funcaoAuditor
-  };
-  await admin.auth().setCustomUserClaims(userRecord.uid, claims);
-  console.log("Custom claims definidas:", claims);
-
-  const db = admin.firestore();
-  await db
-    .collection("profissionais")
-    .doc(userRecord.uid)
-    .set(
-      {
-        nome,
-        credencial_ordem: credencialOrdem,
-        pin_hash: pinHash,
-        papeis: papeisInput,
-        funcao_auditor: funcaoAuditor,
-        servico: servico || null,
-        especialidade: especialidade || null,
-        instituicao_servico: instituicaoServico || null,
-        telefone_institucional: telefoneInstitucional || null,
-        ativo: true,
-        criado_em: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
-
-  console.log(`\nDocumento profissionais/${userRecord.uid} escrito no Firestore.`);
+  console.log(`\nDocumento profissionais/${uid} escrito no Firestore (esquema de PIN com sal).`);
   console.log("\nConcluído. Esta conta já pode identificar-se na app com:");
   console.log(`  Nº de Ordem: ${credencialOrdem}`);
   console.log(`  PIN: ${pin}`);
-  console.log("\n(O PIN nunca fica guardado em texto simples em lado nenhum — só aqui, no teu terminal, agora.)\n");
+  console.log("\n(O PIN nunca fica guardado em texto simples em lado nenhum — só aqui, no teu terminal, agora.");
+  console.log("Não é preciso tocar no Firebase Auth: a conta é criada automaticamente no primeiro login,");
+  console.log("via Custom Token assinado pelo Worker depois de validar este PIN.)\n");
 
   process.exit(0);
 }

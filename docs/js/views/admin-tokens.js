@@ -1,7 +1,37 @@
 /* views/admin-tokens.js — gerar lote, listar pulseiras por estado,
- * atribuir a paciente. Vista de superadmin (o profissional só tem o
- * botão "Solicitar pulseira" dentro do ecrã do paciente — ver
- * nivel1-form.js). */
+ * atribuir a paciente, gravar o chip NFC. Vista de superadmin (o
+ * profissional só tem o botão "Solicitar pulseira" dentro do ecrã do
+ * paciente — ver nivel1-form.js).
+ *
+ * Gravação NFC (26/09/2026, roadmap 1.3 — ver ROADMAP_MELHORIAS.md):
+ * usa a Web NFC API (`NDEFReader`), que só existe no Chrome para Android
+ * com NFC ativado (sem alternativa em iOS — decisão já registada em
+ * CLAUDE.md). Grava sempre e só o token opaco já existente da pulseira
+ * (nunca dado clínico, regra não negociável) como um registo de texto
+ * NDEF — o mesmo formato que o campo de leitura manual em
+ * utilizador-pulseira.js já espera. Não testado em hardware real nesta
+ * sessão (o ambiente de desenvolvimento não tem NFC) — testar num
+ * Android físico antes de usar em produção.
+ */
+function suportaWebNfc() {
+  return "NDEFReader" in window;
+}
+
+async function gravarTokenNoChip(token) {
+  if (!suportaWebNfc()) {
+    throw new Error("Este dispositivo/navegador não suporta Web NFC. Funciona só no Chrome para Android, com NFC ativado.");
+  }
+  var reader = new NDEFReader();
+  try {
+    await reader.write({ records: [{ recordType: "text", data: token }] });
+  } catch (e) {
+    if (e.name === "NotAllowedError") {
+      throw new Error("Permissão de NFC recusada. Autorize o acesso ao NFC para este site e tente novamente.");
+    }
+    throw new Error("Não foi possível gravar o chip: " + e.message + " (encoste o telemóvel ao chip e tente de novo).");
+  }
+}
+
 function viewAdminTokens(root) {
   "use strict";
 
@@ -69,6 +99,27 @@ function viewAdminTokens(root) {
       var tdAcao = tr.lastChild;
 
       if (p.estado === "nao_atribuida") {
+        var btnGravar = document.createElement("button");
+        btnGravar.className = "btn btn-secondary btn-sm";
+        btnGravar.textContent = "Gravar chip";
+        btnGravar.style.marginRight = "6px";
+        btnGravar.title = suportaWebNfc() ? "Grava o token " + p.token + " no chip via NFC" : "Só funciona no Chrome para Android com NFC";
+        btnGravar.addEventListener("click", async function () {
+          btnGravar.disabled = true;
+          var textoOriginal = btnGravar.textContent;
+          btnGravar.textContent = "Encoste o telemóvel ao chip…";
+          try {
+            await gravarTokenNoChip(p.token);
+            SAVI_toast("Chip gravado com o token " + p.token + ".");
+          } catch (e) {
+            alert(e.message);
+          } finally {
+            btnGravar.disabled = false;
+            btnGravar.textContent = textoOriginal;
+          }
+        });
+        tdAcao.appendChild(btnGravar);
+
         var select = document.createElement("select");
         select.style.width = "auto";
         select.style.display = "inline-block";

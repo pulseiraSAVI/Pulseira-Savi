@@ -15,13 +15,18 @@
  * sem esta limitação) continua a escrever `acessos.acedido_em` como
  * timestamp nativo.
  *
- * Restrição importante, documentada no roadmap do CLAUDE.md: criar,
- * editar (papéis/PIN) e eliminar contas de profissionais exige Admin SDK
- * (custom claims + gestão de utilizadores do Firebase Auth), que o
- * cliente nunca pode fazer diretamente — por agora esse caminho continua
- * a ser `scripts/criar-conta.js`. Este ficheiro só implementa a
+ * Gestão de contas (26/09/2026, roadmap "gestão de contas desde a app"):
+ * criar, editar (papéis/dados) e reiniciar o PIN passaram a ser possíveis
+ * a partir da app, mas não através deste ficheiro — vão sempre pelos
+ * endpoints novos do Worker (`POST /admin/contas`, `PATCH
+ * /admin/contas/:id`, `POST /admin/contas/:id/reset-pin`, ver
+ * docs/js/views/admin-contas.js), porque só o Worker (com a service
+ * account) pode gerar o hash do PIN com sal e o Custom Token
+ * correspondente — nunca o cliente. Este ficheiro só implementa a
  * ativação/desativação de contas (troca simples do campo `ativo`, sem
- * tocar em Auth), que é segura de fazer a partir do cliente.
+ * tocar em PIN/papéis), que é segura de fazer diretamente pelo cliente.
+ * Eliminar contas continua de fora — decisão em aberto sobre o efeito em
+ * cascata (ver ROADMAP_MELHORIAS.md, 1.1).
  */
 (function (global) {
   "use strict";
