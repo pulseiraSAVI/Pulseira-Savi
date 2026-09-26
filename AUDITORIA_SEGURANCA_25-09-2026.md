@@ -175,12 +175,20 @@ Firestore diretamente) pode escrever, por exemplo, `estado_consentimento:
 "<qualquer string>"` em vez de um dos 3 valores esperados. Isto amplia a
 superfície do C2 (mais um vetor de dados não confiáveis a chegar aos
 ecrãs) e é, de forma independente, uma falta de validação de schema.
-**Mitigação parcial já aplicada:** os campos deste tipo (`estado_
+**Mitigação parcial já aplicada (25/09):** os campos deste tipo (`estado_
 consentimento`, `estado_verificacao`) passaram a ser escapados como os
-restantes nesta sessão. **Falta:** adicionar `request.resource.data.
-estado_consentimento in ['pendente','ativo','revogado']` (e equivalente
-para outros campos de enumeração) às Rules — mudança pequena, mas requer
-deploy (`firebase deploy --only firestore:rules`).
+restantes nesta sessão.
+
+**Estado (26/09/2026): CORRIGIDO NO CÓDIGO, PENDENTE DE DEPLOY.**
+`backend/firestore.rules` ganhou `estadoConsentimentoValido()` (aplicada
+a `pacientes`, superadmin incluído — não só profissional) e
+`dadosNivel1Validos()` (aplicada a `dados_nivel1`, valida
+`estado_verificacao` e `limitacao_terapeutica`). A regra de leitura de
+`pacientes` foi separada da de update/delete para a validação de
+conteúdo não interferir com a verificação estática de list queries (a
+mesma técnica já usada para o bug de list de 25/09). Falta só
+`firebase deploy --only firestore:rules` — ver checklist no final deste
+documento.
 
 ### A2 — `auth_time` não serve para medir inatividade
 
@@ -204,14 +212,19 @@ esboçado como TODO em `wrangler.toml`, precisa de decisão + binding novo
 
 ### A3 — Método de acesso por identidade lê a coleção `pacientes` inteira para a memória do Worker
 
-`firestoreQueryPorIdentidade` (Worker) faz um `GET` a toda a coleção
-`pacientes` e filtra em JavaScript, em vez de uma query estruturada.
-Aceitável a 50 pacientes (Fase 1), mas: (a) não escala, e (b) mantém
+`firestoreQueryPorIdentidade` (Worker) fazia um `GET` a toda a coleção
+`pacientes` e filtrava em JavaScript, em vez de uma query estruturada.
+Aceitável a 50 pacientes (Fase 1), mas: (a) não escala, e (b) mantinha
 temporariamente na memória do Worker os dados administrativos de TODOS
-os pacientes só para responder a um pedido sobre um. Já está identificado
-como TODO no próprio código ("se o piloto crescer, criar índice
-composto"); passar a acontecer antes do piloto, não depois, evita ter de
-migrar isto com dados reais já em produção.
+os pacientes só para responder a um pedido sobre um.
+
+**Estado (26/09/2026): CORRIGIDO NO CÓDIGO, PENDENTE DE DEPLOY.** Passa a
+usar uma query estruturada (`runQuery`) com filtro composto em
+`data_nascimento` + `sexo` (igualdade em dois campos não exige índice
+composto no Firestore) — reduz o conjunto candidato a um punhado de
+documentos antes de comparar `nome` em memória (essa comparação continua
+em JS, porque é case-insensitive/trim, algo que uma `EQUAL` do Firestore
+não faz). Falta só `wrangler deploy` — ver checklist no final.
 
 ---
 
@@ -222,7 +235,11 @@ migrar isto com dados reais já em produção.
   domínio real do GitHub Pages). Não é um risco direto (CORS só limita
   JavaScript de browser, não `curl`), mas é uma prática a corrigir —
   separar por ambiente quando existir um processo de deploy com
-  variáveis de ambiente.
+  variáveis de ambiente. **Decisão (26/09/2026): mantido deliberadamente
+  por agora** (documentado no próprio código) — corrigir isto a sério
+  exige `wrangler.toml` com ambientes (`[env.production]`/`[env.dev]`) e
+  um pipeline que escolha o ambiente certo, mudança de processo maior do
+  que o risco justifica hoje.
 - **Chave de service account do Firebase Admin SDK existe em disco**
   localmente (`scripts/pulseira-savi-firebase-adminsdk-fbsvc-
   5972a2b955.json`) — confirmei que está corretamente listada no
@@ -235,11 +252,11 @@ migrar isto com dados reais já em produção.
 - **Sem validação de tamanho/tipo no upload de documentos**
   (`nivel1-form.js`, `input type="file"`) — aceita qualquer PDF/imagem
   sem limite de tamanho explícito no cliente; as Storage Rules também não
-  impõem `request.resource.size` nem `contentType`. Um profissional
-  (malicioso ou com erro) pode encher o bucket com ficheiros grandes ou
-  de tipo inesperado. Correção pequena nas Storage Rules (`allow write:
-  if ... && request.resource.size < 10 * 1024 * 1024 && request.
-  resource.contentType.matches('application/pdf|image/.*')`).
+  impunham `request.resource.size` nem `contentType`. **Estado
+  (26/09/2026): CORRIGIDO NO CÓDIGO, PENDENTE DE DEPLOY** —
+  `backend/storage.rules` passou a exigir `request.resource.size < 10 *
+  1024 * 1024 && request.resource.contentType.matches('application/
+  pdf|image/.*')` na escrita. Falta `firebase deploy --only storage`.
 
 ## Achados de risco baixo (higiene de código — corrigidos nesta sessão)
 
